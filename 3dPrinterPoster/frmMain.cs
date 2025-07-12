@@ -1,0 +1,360 @@
+using Newtonsoft.Json;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+
+
+namespace _3dPrinterPoster
+{
+  public partial class frmMain : Form
+  {
+
+    private PrintSettings currentSettings;
+    private FormSettings formSettings = new FormSettings();
+
+
+
+    [DllImport("kernel32.dll")]
+    static extern bool AllocConsole();
+
+    private void frmMain_Load(object sender, EventArgs e)
+    {
+      AllocConsole();
+
+      formSettings = formSettings.LoadFormSettings();
+      if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
+      {
+        try
+        {
+          string json = File.ReadAllText(formSettings.LastSettingsFile);
+          currentSettings = JsonConvert.DeserializeObject<PrintSettings>(json);
+          MessageBox.Show($"Loaded settings profile: {currentSettings.ProfileName}",
+              "Settings Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+          MessageBox.Show($"Failed to load settings:\n{ex.Message}",
+              "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+      }
+    }
+
+    public frmMain()
+    {
+      InitializeComponent();
+    }
+
+    private void btnOpenFile_Click(object sender, EventArgs e)
+    {
+      Electroimpact.FileParser.cFileParse fp = new Electroimpact.FileParser.cFileParse();
+
+
+      using (OpenFileDialog openFileDialog = new OpenFileDialog())
+      {
+        openFileDialog.Filter = "GCode files (*.gcode)|*.gcode|All files (*.*)|*.*";
+        openFileDialog.Title = "Open GCode File";
+
+        // If there's a last file, set its folder and filename
+        if (!string.IsNullOrEmpty(formSettings.LastGcodeFile))
+        {
+          openFileDialog.InitialDirectory = Path.GetDirectoryName(formSettings.LastGcodeFile);
+          openFileDialog.FileName = Path.GetFileName(formSettings.LastGcodeFile);
+        }
+
+        if (openFileDialog.ShowDialog() == DialogResult.OK)
+        {
+          string path = openFileDialog.FileName;
+          formSettings.LastGcodeFile = path;
+          formSettings.SaveFormSettings(); // Save the last Gcode file path
+
+          try
+          {
+            string[] lines = File.ReadAllLines(path);
+
+            Console.WriteLine("File loaded with " + lines.Length + " lines.");
+
+            int bedTemp = currentSettings.BedTempByLayer[0].Temp; // Get the first layer bed temperature
+            int nozzleTemp = currentSettings.NozzleTempByLayer[0].Temp; // Get the first layer nozzle temperature
+
+            // Step 1: Initial cleanup
+            var cleanedLines = lines.Where(line =>
+            {
+                string trimmed = line.TrimStart();
+
+                // Remove any lines that control temps — we'll handle them later
+                if (trimmed.StartsWith("M104")) return false;
+                if (trimmed.StartsWith("M140")) return false;
+                if (trimmed.StartsWith("M109")) return false;
+                if (trimmed.StartsWith("M190")) return false;
+
+                // G29 is optional via checkbox
+                if (trimmed.StartsWith("G29") && !chkIncludeG29.Checked) return false;
+
+                return true;
+            }).ToList();
+            
+
+            bool isFromQidiStudio = cleanedLines.Any(line => line.Contains("QIDIStudio"));
+            string layerTag = isFromQidiStudio ? ";Z_HEIGHT:" : ";Z:";
+
+            // Step 2: Apply layer-aware edits
+            bool inFirstLayer = true;
+            var modifiedLines = new List<string>();
+            double currentZ = 0.0;
+            int currentLayer = 0;
+            double lastZ = 0;
+            bool inWipeEnd = false;
+            bool inE1command = false;
+
+            double layerHeight = 0.2;
+            bool nozzleTempSet = false;
+
+            foreach (var line in cleanedLines)
+            {
+              string modifiedLine = line;
+
+              if (chkIncludeG29.Checked && line.Trim().Contains("G29"))
+              {
+                modifiedLines.Add($"M190 S{bedTemp} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
+                modifiedLines.Add(line + " ; G29 included by User Preference.");
+                continue;
+              }
+
+              // Handle initial nozzle temperature before any extrusion (E > 0)
+              if (!nozzleTempSet)
+              {
+                  if (line.Contains("G0") || line.Contains("G1"))
+                  {
+                      if (fp.GetArgument(line, "E", out double evalue) && evalue > 0)
+                      {
+                          modifiedLines.Add($"M109 S{nozzleTemp} ; Set nozzle temp for first extrusion - blocking - inserted by 3D Printer Poster");
+                          nozzleTempSet = true;
+                      }
+                  }
+              }
+
+
+              if (line.Trim().Equals("PRINT_START", StringComparison.OrdinalIgnoreCase))
+              {
+                modifiedLines.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
+                modifiedLines.Add("M104 S200 ; start nozzle preheat (non-blocking)");
+              }
+
+              // handle Extruder Temp
+              string lineTrimmed = Regex.Replace(line, @"\s+", "");
+              if (lineTrimmed.StartsWith(layerTag))
+              {
+                lineTrimmed = isFromQidiStudio ? lineTrimmed.Replace("Z_HEIGHT:", "Z:") : lineTrimmed;
+                string ZArgument = "Z:";
+                currentZ = fp.GetArgument2(lineTrimmed, ZArgument);
+                currentLayer = (int)Math.Round(currentZ / layerHeight);
+                inFirstLayer = currentLayer == 1;
+
+                modifiedLines.Add(modifiedLine + $" ; layer {currentLayer}");
+
+                // Look for a matching temp setting for this layer
+                var tempEntry = currentSettings?.NozzleTempByLayer?
+                    .FirstOrDefault(t => t.Layer == currentLayer - 1);
+
+                if (tempEntry != null)
+                {
+                  string mcode = currentLayer == 1 ? "M109" : "M104";
+                  string blockingComment = currentLayer == 1
+                      ? "blocking - wait for nozzle temp"
+                      : "non-blocking - continue printing";
+
+                  modifiedLines.Add($"{mcode} S{tempEntry.Temp} ; nozzle temp for layer {currentLayer} - {blockingComment}");
+                }
+
+                // Look for matching bed temp for this layer
+                var bedTempEntry = currentSettings?.BedTempByLayer?
+                    .FirstOrDefault(t => t.Layer == currentLayer - 1);
+
+                if (bedTempEntry != null)
+                {
+                  string bedMCode = currentLayer == 1 ? "M190" : "M140";
+                  string bedComment = currentLayer == 1
+                      ? "blocking - wait for bed temp"
+                      : "non-blocking - continue printing";
+
+                  modifiedLines.Add($"{bedMCode} S{bedTempEntry.Temp} ; bed temp for layer {currentLayer} - {bedComment}");
+                }
+
+                continue;
+              }
+
+
+              //Override Feedrates
+              if (line.StartsWith("G1"))
+              {
+                double argument;
+                bool farg = fp.GetArgument(line, "F", out argument);
+                double fCmd = argument;
+
+                if (farg)
+                {
+                  Console.WriteLine("Layer: " + currentLayer);
+                  bool xarg = fp.GetArgument(line, "X", out argument);
+                  bool yarg = fp.GetArgument(line, "Y", out argument);
+                  bool earg = fp.GetArgument(line, "E", out argument);
+
+                  if (line.StartsWith("G1 F") || (xarg && yarg && earg))
+                  {
+                    //int currentSpeed = Speeds[Speeds.Count - 1]; // default to last speed
+                    int currentSpeed = currentSettings.SpeedByLayer[currentSettings.SpeedByLayer.Count - 1].Speed; // default to last speed
+                    if (currentLayer - 1 < currentSettings.SpeedByLayer.Count && currentLayer > 0)
+                    {
+                      currentSpeed = currentSettings.SpeedByLayer[currentLayer - 1].Speed; // get speed for current layer
+                    }
+
+                    if (fCmd > currentSpeed * 60)
+                    {
+                      fp.ReplaceArgument(modifiedLine, "F", currentSpeed * 60, out modifiedLine, "F0");
+
+                      string layerComment = currentLayer switch
+                      {
+                        1 => "first layer",
+                        2 => "second layer",
+                        3 => "third layer",
+                        _ => "subsequent layers"
+                      };
+
+                      modifiedLine += $" ; feedrate set to {currentSpeed * 60}mm/min {currentSpeed}mm/sec for test {layerComment} - modified by 3D Printer Poster";
+                      modifiedLines.Add(modifiedLine);
+                      continue;
+                    }
+                  }
+                }
+              }
+
+
+              if (currentLayer > 0)
+              {
+                inWipeEnd = line.Contains("WIPE_END") || inWipeEnd;
+
+                int gcmd = (int)fp.GetArgument2(line, "G");
+                if (gcmd == 0 || gcmd == 1)
+                {
+                  if (line.Contains("Z"))
+                  {
+                    double zcmd = fp.GetArgument2(line, "Z");
+                    if (zcmd - lastZ > .2 && inWipeEnd)
+                    {
+                      modifiedLines.Add(modifiedLine + " ; Z hop detected");
+                      //Console.WriteLine("Z hop detected");
+                      inWipeEnd = false; // reset after handling Z hop
+                      continue;
+                    }
+                    lastZ = zcmd;
+                  }
+                }
+              }
+
+              if (line.Contains("EXECUTABLE_BLOCK_END"))
+              {
+                modifiedLines.Add("M140 S0 ; Shut down the bed, non-blocking");
+                modifiedLines.Add("M109 S0 ; Shut down the extruder, blocking");
+                modifiedLines.Add("M106 S0 ; Shut off fans");
+
+              }
+
+              // Default: add line unchanged
+              modifiedLines.Add(line);
+            }
+
+            string originalPath = openFileDialog.FileName;
+            string directory = Path.GetDirectoryName(path);
+            string filenameWithoutExt = Path.GetFileNameWithoutExtension(path);
+            string newPath = Path.Combine(directory, $"{filenameWithoutExt}_mod.gcode");
+
+            File.WriteAllLines(newPath, modifiedLines);
+
+            Console.WriteLine($"Modified file saved as:\n{newPath}", "Save Successful", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+          }
+          catch (Exception ex)
+          {
+            MessageBox.Show("Error reading file: " + ex.Message);
+          }
+        }
+      }
+    }
+
+    private void btnOpenSettingsFile_Click(object sender, EventArgs e)
+    {
+      using (OpenFileDialog openFileDialog = new OpenFileDialog())
+      {
+
+        openFileDialog.Filter = "Settings files (*.settings.json)|*.settings.json|All files (*.*)|*.*";
+        openFileDialog.Title = "Open Print Settings File";
+
+        // If there's a last file, set its folder and filename
+        if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
+        {
+          openFileDialog.InitialDirectory = Path.GetDirectoryName(formSettings.LastSettingsFile);
+          openFileDialog.FileName = Path.GetFileName(formSettings.LastSettingsFile);
+        }
+
+        if (openFileDialog.ShowDialog() == DialogResult.OK)
+        {
+          try
+          {
+            string json = File.ReadAllText(openFileDialog.FileName);
+            currentSettings = JsonConvert.DeserializeObject<PrintSettings>(json);
+            formSettings.LastSettingsFile = openFileDialog.FileName;
+            formSettings.SaveFormSettings(); // Save the last settings file path
+
+            MessageBox.Show($"Loaded settings profile: {currentSettings.ProfileName}",
+                "Settings Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
+          }
+          catch (Exception ex)
+          {
+            MessageBox.Show($"Failed to load settings:\n{ex.Message}",
+                "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+          }
+        }
+      }
+    }
+
+    private void btnSaveSettingsFileAs_Click(object sender, EventArgs e)
+    {
+      using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+      {
+        saveFileDialog.Title = "Save Settings File As";
+        saveFileDialog.Filter = "Settings files (*.settings.json)|*.settings.json|All files (*.*)|*.*";
+        saveFileDialog.DefaultExt = "settings.json";
+
+        // Default to current settings file folder if available
+        if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
+        {
+          saveFileDialog.InitialDirectory = Path.GetDirectoryName(formSettings.LastSettingsFile);
+          saveFileDialog.FileName = Path.GetFileName(formSettings.LastSettingsFile);
+        }
+        else
+        {
+          saveFileDialog.FileName = "newProfile.settings.json";
+        }
+
+        if (saveFileDialog.ShowDialog() == DialogResult.OK)
+        {
+          try
+          {
+            // Serialize current settings
+            string json = JsonConvert.SerializeObject(currentSettings, Formatting.Indented);
+            File.WriteAllText(saveFileDialog.FileName, json);
+
+            // Update formSettings
+            formSettings.LastSettingsFile = saveFileDialog.FileName;
+
+            MessageBox.Show("Settings saved successfully.", "Success",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+          }
+          catch (Exception ex)
+          {
+            MessageBox.Show($"Failed to save settings:\n{ex.Message}", "Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+          }
+        }
+      }
+    }
+  }
+}

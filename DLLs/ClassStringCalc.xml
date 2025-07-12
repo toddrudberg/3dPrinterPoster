@@ -1,0 +1,134 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>ClassStringCalc</name>
+    </assembly>
+    <members>
+        <member name="P:Electroimpact.csString.String">
+            <summary>
+            Sets or gets internal string.  Setting rewinds the string pointer.
+            </summary>
+        </member>
+        <member name="P:Electroimpact.csString.Length">
+            <summary>
+            Returns length of internal string.
+            </summary>
+        </member>
+        <member name="P:Electroimpact.csString.constants">
+            <summary>
+            Returns the constants defined as numeric values.  Currently e and pi are it.  e doesn't work in the calculator and I don't care.
+            </summary>
+        </member>
+        <member name="M:Electroimpact.csString.BreakUp(System.String,System.Int32)">
+            <summary>
+            Returns array of strings broken up based on the size passed.
+            </summary>
+            <param name="str">string to break up</param>
+            <param name="size">max length of string</param>
+            <returns>array of System.String[] array</returns>
+        </member>
+        <member name="M:Electroimpact.csString.FindInteger(System.Int32,System.Int32@)">
+            <summary>
+            Finds integer portion of the member string in string class beginning at start.
+            </summary>
+            <param name="start">integer position to start looking for integer in string</param>
+            <param name="Value">out int the integer this function finds</param>
+            <returns>the end of the integer portion of the string.</returns>
+        </member>
+        <member name="M:Electroimpact.csString.InString(System.String,System.String)">
+            <summary>
+            Wrapper for system.string.IndexOf(string in).  Returns boolean if CompareString contains c.
+            </summary>
+            <param name="c">string:  Substring you are looking for</param>
+            <param name="CompareString">string: String that may have c in it.</param>
+            <returns>bool</returns>
+            <seealso cref="!:InString(string c, string CompareString)"/>
+        </member>
+        <member name="M:Electroimpact.csString.InThis(System.String)">
+            <summary>
+            compares member string to Substring
+            </summary>
+            <param name="SubString">System.string</param>
+            <returns>bool</returns>
+            <seealso cref="!:public bool InString(string c, string CompareString)"/>
+        </member>
+        <member name="M:Electroimpact.csString.GetItem">
+            <summary>
+            Returns a string of one character.  This is the next character to the string pointer.  This function advances the string pointer
+            </summary>
+            <returns>string of on character</returns>
+        </member>
+        <member name="M:Electroimpact.csString.GetLeft(System.Int32)">
+            <summary>
+            Returns a substring from the current position and advancess the string pointer by ii.
+            </summary>
+            <param name="ii">number of characters to return and advance the string pointer by.</param>
+            <returns>string</returns>
+            <seealso cref="!:GetLeft(int ii)"/>
+        </member>
+        <member name="M:Electroimpact.csString.GetLeftNoAdv(System.Int32)">
+            <summary>
+            Returns a substring from the current position without affecting the string pointer.
+            </summary>
+            <param name="ii">integer number of characters to return</param>
+            <returns>string</returns>
+            <seealso cref="!:GetLeft(int ii)"/>
+        </member>
+        <member name="T:Electroimpact.StringCalc.IVariables">
+            <summary>
+            
+            To utilize string calc, simply call SimpleCalc(string myString)
+            where myString is an equation.  
+            
+            To get more fancy assign variables and use them
+            
+            To break the steps down, you can call SetOrderOfOperations2(string myString)
+            to see how the string will be sent to the parser.
+            
+            Then call parse(string returnfromSetOrderOfOperations2)
+            
+            To add operators, first you will need to modify code in:
+            
+            SetOrderOfOperation2
+            parse
+            ReturnThisLevel
+            WhoIsBigger
+            
+            Written for a veritety of purposes for Electroimpact by Todd W. Rudberg.
+            </summary>
+            
+        </member>
+        <member name="M:Electroimpact.StringCalc.cStringCalc.IsE(System.String)">
+            <summary>
+            Checks last character in a string for e.  However, if the 
+            characters prior to e are not numeric, this returns false.
+            The purpose of this function is to determin if the "e"
+            stands for exp or a power of ten function.
+            </summary>
+            <param name="Operand">string to be evaluated</param>
+            <returns>bool</returns>
+        </member>
+        <member name="M:Electroimpact.StringCalc.cStringCalc.cVariables._GetVariable(System.String)">
+            <summary>
+            Returns the double variable value
+            </summary>
+            <param name="Tag"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Electroimpact.StringCalc.cStringCalc.cVariables._GetVariableNote(System.String)">
+            <summary>
+            Returns the double variable value
+            </summary>
+            <param name="Tag"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Electroimpact.StringCalc.cStringCalc.cMacroVars.ClearMacroVars">
+            <summary>
+            Clears macro variables #100-#199. This will
+            be used when a new program is loaded or when
+            M2, M30, or M31 is run. Closer to the way
+            the A380 control program runs.
+            </summary>
+        </member>
+    </members>
+</doc>
