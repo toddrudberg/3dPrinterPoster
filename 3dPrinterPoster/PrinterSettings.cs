@@ -1,63 +1,28 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace _3dPrinterPoster
+﻿namespace _3dPrinterPoster
 {
   public class PrintSettings
   {
     public string ProfileName { get; set; } = "default";
 
-    // Layer-based bed temperature settings
+    // Identification
+    public MaterialType Material { get; set; } = MaterialType.Unknown;
+    public PrinterType Printer { get; set; } = PrinterType.Unknown;
+
+    // Temps
     public List<LayerTempSetting> BedTempByLayer { get; set; } = new();
     public List<LayerTempSetting> NozzleTempByLayer { get; set; } = new();
 
-    // Layer-based speed settings
+    // NEW: single chamber target (°C). Null/0 means "don’t set".
+    public int? ChamberTempC { get; set; } = null;
+
+    // Speeds
     public List<LayerSpeedSetting> SpeedByLayer { get; set; } = new();
-  
-    // Mass-based control
-    public List<MassBasedFeedrate> FeedrateByMass { get; set; } = new();
 
-    // Zone-based XY feedrate limiter
-    public List<SlowZone> FeedrateZones { get; set; } = new();
-
-    // Fan and other custom commands (optional for now)
-    public List<CustomCommand> CustomCommands { get; set; } = new();
-  }
-  public class LayerTempSetting
-  {
-    public int Layer { get; set; }          // Use -1 to represent "end - N"
-    public int Temp { get; set; }
   }
 
-  public class LayerSpeedSetting
-  {
-    public int Layer { get; set; }          // Use -1 to represent "end - N"
-    public int Speed { get; set; }
-  }
+  public class LayerTempSetting { public int Layer { get; set; } public int Temp { get; set; } }
+  public class LayerSpeedSetting { public int Layer { get; set; } public int Speed { get; set; } }
 
-  public class MassBasedFeedrate
-  {
-    public double MinMassG { get; set; }
-    public double Feedrate { get; set; }
-  }
-
-  public class SlowZone
-  {
-    public double XMin { get; set; }
-    public double XMax { get; set; }
-    public double YMin { get; set; }
-    public double YMax { get; set; }
-    public double FeedrateLimit { get; set; }
-  }
-
-  public class CustomCommand
-  {
-    public int Layer { get; set; }
-    public string Gcode { get; set; }
-    public string Comment { get; set; } = "";
-  }
-
+  public enum MaterialType { Unknown = 0, PLA, PETG, ABS, ASA, PA12_CF, Nylon, PC, TPU }
+  public enum PrinterType { Unknown = 0, QIDI_Q1_Pro, QIDI_X_MAX_3, Bambu_X1C, Prusa_MK4, Other }
 }
