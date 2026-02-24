@@ -23,6 +23,6 @@
   public class LayerTempSetting { public int Layer { get; set; } public int Temp { get; set; } }
   public class LayerSpeedSetting { public int Layer { get; set; } public int Speed { get; set; } }
 
-  public enum MaterialType { Unknown = 0, PLA, PETG, ABS, ASA, PA12_CF, Nylon, PC, TPU }
+  public enum MaterialType { Unknown = 0, PLA, PETG, ABS, ASA, PA12_CF, PA12_GF, Nylon, PC, TPU }
   public enum PrinterType { Unknown = 0, QIDI_Q1_Pro, QIDI_X_MAX_3, Bambu_X1C, Prusa_MK4, Other }
 }

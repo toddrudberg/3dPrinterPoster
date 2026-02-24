@@ -45,7 +45,7 @@ namespace _3dPrinterPoster
 
     private void btnOpenFile_Click(object sender, EventArgs e)
     {
-      Electroimpact.FileParser.cFileParse fp = new Electroimpact.FileParser.cFileParse();
+      ToddUtils.FileParser.cFileParse fp = new ();
 
 
       using (OpenFileDialog openFileDialog = new OpenFileDialog())
@@ -112,17 +112,24 @@ namespace _3dPrinterPoster
             int? lastNozzleTemp = null;
             int? lastBedTemp = null;
             int? lastChamberTemp = null;
+            bool ExecutionEnd = false;
 
             foreach (var line in cleanedLines)
             {
               string modifiedLine = line;
 
-              if (currentSettings.Printer == PrinterType.QIDI_X_MAX_3 && chkIncludeG29.Checked && line.Trim().Contains("G29"))
+              if (ExecutionEnd)
               {
-                modifiedLines.Add($"M190 S{bedTemp} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
-                modifiedLines.Add(line + " ; G29 included by User Preference.");
-                continue;
+                modifiedLines.Add(line);
+                continue; // Skip further processing if execution has ended
               }
+
+              if (currentSettings.Printer == PrinterType.QIDI_X_MAX_3 && chkIncludeG29.Checked && line.Trim().Contains("G29"))
+                {
+                  modifiedLines.Add($"M190 S{bedTemp} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
+                  modifiedLines.Add(line + " ; G29 included by User Preference.");
+                  continue;
+                }
 
               // Handle initial nozzle temperature before any extrusion (E > 0)
               if (!nozzleTempSet)
@@ -138,7 +145,7 @@ namespace _3dPrinterPoster
                     modifiedLines.Add($"M190 S{bedTemp} ; wait for bed");
                     modifiedLines.Add($"M109 S{nozzleTemp} ; wait for nozzle");
                     if (chamberTemp > 0)
-                      modifiedLines.Add($"M191 S{chamberTemp} ; wait for chamber");                    
+                      modifiedLines.Add($"M191 S{chamberTemp} ; wait for chamber");
 
                     nozzleTempSet = true;
                   }
@@ -314,6 +321,7 @@ namespace _3dPrinterPoster
                 modifiedLines.Add("M141 S0 ; Shut down the chamber, non-blocking");
                 modifiedLines.Add("M109 S0 ; Shut down the extruder, blocking");
                 modifiedLines.Add("M106 S0 ; Shut off fans");
+                ExecutionEnd = true;
               }
 
               // Default: add line unchanged
