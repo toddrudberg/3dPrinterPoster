@@ -21,7 +21,7 @@ namespace _3dPrinterPoster
     [Category("Identification")]
     public PrinterType Printer { get; set; } = PrinterType.Unknown;
 
-    [Category("LayerHeight")]
+    [Category("LayerHeight (mm)")]
     [DefaultValue(0.2)]
     public double LayerHeight { get; set; } = 0.3;
 
@@ -48,12 +48,94 @@ namespace _3dPrinterPoster
     [Description("Layer-indexed speed targets (mm/s).")]
     public List<LayerSpeedSetting> SpeedByLayer { get; set; } = new();
 
+    // --- Add these settings (optional but recommended) ---
+
+    [Category("Flow")]
+    [DisplayName("Assumed Line Width (mm)")]
+    [Description("Used for flow preview calculations. Set this to your typical line width (e.g., 0.65 for a 0.6 nozzle).")]
+    [DefaultValue(0.65)]
+    public double AssumedLineWidthMm { get; set; } = 0.65;
+
+    [Category("Flow")]
+    [DisplayName("Recommended Max Flow (mm³/s)")]
+    [Description("Your personal recommended ceiling for this material/printer/hotend combo. Used for preview only.")]
+    [DefaultValue(20.0)]
+    public double RecommendedMaxFlowMm3PerSec { get; set; } = 20.0;
+
+    // --- Previews ---
+
+    [Category("Preview")]
+    [DisplayName("Max Speed (from ramp)")]
+    [ReadOnly(true)]
+    public int MaxSpeedPreviewMmPerSec =>
+      (SpeedByLayer == null || SpeedByLayer.Count == 0)
+        ? 0
+        : SpeedByLayer.OrderBy(s => s.Layer).Last().Speed;
+
+    [Category("Preview")]
+    [DisplayName("Flow @ Max Speed")]
+    [ReadOnly(true)]
+    public string FlowAtMaxSpeedPreview
+    {
+      get
+      {
+        int vmax = MaxSpeedPreviewMmPerSec;
+        if (vmax <= 0) return "(no speed ramp)";
+        if (LayerHeight <= 0) return "(invalid LayerHeight)";
+        if (AssumedLineWidthMm <= 0) return "(invalid line width)";
+
+        double flow = AssumedLineWidthMm * LayerHeight * vmax; // mm^3/s
+        string verdict = (RecommendedMaxFlowMm3PerSec > 0)
+          ? (flow <= RecommendedMaxFlowMm3PerSec ? "OK" : "HIGH")
+          : "—";
+
+        return $"{flow:0.0} mm³/s  (w={AssumedLineWidthMm:0.###}, h={LayerHeight:0.###}, v={vmax} mm/s)  [{verdict}]";
+      }
+    }
+
+    [Category("Preview")]
+    [DisplayName("Recommended Max Flow")]
+    [ReadOnly(true)]
+    public string RecommendedMaxFlowPreview =>
+      (RecommendedMaxFlowMm3PerSec > 0)
+        ? $"{RecommendedMaxFlowMm3PerSec:0.0} mm³/s  (material/printer guideline)"
+        : "(not set)";
+
     // Optional: keeps things tidy if you want a deterministic view/save
     public void SortAll()
     {
       BedTempByLayer = BedTempByLayer.OrderBy(x => x.Layer).ToList();
       NozzleTempByLayer = NozzleTempByLayer.OrderBy(x => x.Layer).ToList();
       SpeedByLayer = SpeedByLayer.OrderBy(x => x.Layer).ToList();
+    }
+
+    [Category("Ramp Summary")]
+    [DisplayName("Speed Ramp")]
+    [ReadOnly(true)]
+    public string SpeedRampPreview => RampPreview(
+  SpeedByLayer?.OrderBy(x => x.Layer).Select(x => $"L{x.Layer}:{x.Speed}mm/s")
+);
+
+    [Category("Ramp Summary")]
+    [DisplayName("Nozzle Ramp")]
+    [ReadOnly(true)]
+    public string NozzleRampPreview => RampPreview(
+      NozzleTempByLayer?.OrderBy(x => x.Layer).Select(x => $"L{x.Layer}:{x.Temp}°C")
+    );
+
+    [Category("Ramp Summary")]
+    [DisplayName("Bed Ramp")]
+    [ReadOnly(true)]
+    public string BedRampPreview => RampPreview(
+      BedTempByLayer?.OrderBy(x => x.Layer).Select(x => $"L{x.Layer}:{x.Temp}°C")
+    );
+
+    private static string RampPreview(IEnumerable<string>? items, int maxChars = 180)
+    {
+      if (items == null) return "(none)";
+      string s = string.Join(", ", items);
+      if (string.IsNullOrWhiteSpace(s)) return "(none)";
+      return s.Length <= maxChars ? s : s.Substring(0, maxChars) + "…";
     }
 
 
