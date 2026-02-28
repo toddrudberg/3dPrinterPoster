@@ -1,6 +1,19 @@
 using Newtonsoft.Json;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using static System.Windows.Forms.Design.AxImporter;
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Drawing.Printing;
 
 
 namespace _3dPrinterPoster
@@ -10,8 +23,15 @@ namespace _3dPrinterPoster
 
     private PrintSettings currentSettings;
     private FormSettings formSettings = new FormSettings();
-
-
+    //public TuningDialog(PrintSettings options)
+    //{
+    //  InitializeComponent();
+    //  _original = options;
+    //  Options = Clone(options);                 // work on a copy
+    //  propertyGrid1.SelectedObject = Options;
+    //  Text = "Program Tuning";
+    //  AcceptButton = btnOK; CancelButton = btnCancel;
+    //}
 
     [DllImport("kernel32.dll")]
     static extern bool AllocConsole();
@@ -25,8 +45,8 @@ namespace _3dPrinterPoster
       {
         try
         {
-          string json = File.ReadAllText(formSettings.LastSettingsFile);
-          currentSettings = JsonConvert.DeserializeObject<PrintSettings>(json);
+          //string json = File.ReadAllText(formSettings.LastSettingsFile);
+          currentSettings = PrintSettings.Load(formSettings.LastSettingsFile); //JsonConvert.DeserializeObject<PrintSettings>(json);
           MessageBox.Show($"Loaded settings profile: {currentSettings.ProfileName}",
               "Settings Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -46,6 +66,67 @@ namespace _3dPrinterPoster
     private void btnOpenFile_Click(object sender, EventArgs e)
     {
       ToddUtils.FileParser.cFileParse fp = new ();
+
+      using (var openFileDialog = new OpenFileDialog())
+      {
+        openFileDialog.Filter = "Settings files (*.settings.json)|*.settings.json|All files (*.*)|*.*";
+        openFileDialog.Title = "Open Print Settings File";
+
+        // If there's a last file, set its folder and filename
+        if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
+        {
+          var lastDir = Path.GetDirectoryName(formSettings.LastSettingsFile);
+          if (!string.IsNullOrEmpty(lastDir) && Directory.Exists(lastDir))
+            openFileDialog.InitialDirectory = lastDir;
+
+          openFileDialog.FileName = Path.GetFileName(formSettings.LastSettingsFile);
+        }
+
+        if (openFileDialog.ShowDialog() != DialogResult.OK)
+        {
+          this.Enabled = true;
+          return; // cancelled
+        }
+
+        string settingsPath = openFileDialog.FileName;
+
+        try
+        {
+          // Load selected config (single source of truth)
+          currentSettings = PrintSettings.Load(settingsPath);
+
+          // Remember path
+          formSettings.LastSettingsFile = settingsPath;
+          formSettings.SaveFormSettings();
+
+          using var dlg = new TuningDialog(currentSettings);
+          if (dlg.ShowDialog(this) == DialogResult.OK)
+          {
+            currentSettings.CopyFrom(dlg.Options);   // commit changes into existing instance
+            currentSettings.Save(settingsPath);
+
+            MessageBox.Show(
+              $"Saved settings profile: {currentSettings.ProfileName}",
+              "Settings Saved",
+              MessageBoxButtons.OK,
+              MessageBoxIcon.Information);
+          }
+          // else: do nothing (cancel means no changes)
+        }
+        catch (Exception ex)
+        {
+          MessageBox.Show(
+            $"Failed to load/save settings:\n{ex.Message}",
+            "Error",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+
+          this.Enabled = true;
+          return;
+        }
+      }
+
+
 
 
       using (OpenFileDialog openFileDialog = new OpenFileDialog())
@@ -107,7 +188,7 @@ namespace _3dPrinterPoster
             bool inWipeEnd = false;
             bool inE1command = false;
 
-            double layerHeight = 0.2;
+            double layerHeight = currentSettings.LayerHeight;
             bool nozzleTempSet = false;
             int? lastNozzleTemp = null;
             int? lastBedTemp = null;
@@ -200,23 +281,19 @@ namespace _3dPrinterPoster
                 lineTrimmed = isFromQidiStudio ? lineTrimmed.Replace("Z_HEIGHT:", "Z:") : lineTrimmed;
                 string ZArgument = "Z:";
                 currentZ = fp.GetArgument2(lineTrimmed, ZArgument);
+
                 currentLayer = (int)Math.Round(currentZ / layerHeight);
+                if (currentLayer < 1) currentLayer = 1;
 
                 modifiedLines.Add(modifiedLine + $" ; layer {currentLayer}");
 
-                // Targets for this layer (your convention: entry.Layer == currentLayer - 1)
-                var nozzleEntry = currentSettings?.NozzleTempByLayer?
-                    .FirstOrDefault(t => t.Layer == currentLayer - 1);
-                var bedEntry = currentSettings?.BedTempByLayer?
-                    .FirstOrDefault(t => t.Layer == currentLayer - 1);
-
-                int? nozzleTarget = nozzleEntry?.Temp;
-                int? bedTarget = bedEntry?.Temp;
+                int? nozzleTarget = currentSettings?.GetNozzleTempForLayer(currentLayer);
+                int? bedTarget = currentSettings?.GetBedTempForLayer(currentLayer);
 
                 // Single chamber value (optional)
                 int? chamberTarget = (currentSettings?.ChamberTempC is > 0) ? currentSettings.ChamberTempC : null;
 
-                // Emit only if the value is present AND changed since last time
+                // Emit only if present AND changed since last time
                 bool changeNozzle = nozzleTarget.HasValue && nozzleTarget != lastNozzleTemp;
                 bool changeBed = bedTarget.HasValue && bedTarget != lastBedTemp;
                 bool changeChamber = chamberTarget.HasValue && chamberTarget != lastChamberTemp;
@@ -230,7 +307,7 @@ namespace _3dPrinterPoster
                   if (changeNozzle) modifiedLines.Add($"M104 S{nozzleTarget} ; nozzle start (non-blocking)");
                   if (changeChamber) modifiedLines.Add($"M141 S{chamberTarget} ; chamber start (non-blocking)");
 
-                  // On the first printable layer, wait before proceeding; otherwise keep non-blocking
+                  // On the first printable layer, wait before proceeding
                   if (currentLayer == 1)
                   {
                     if (changeBed) modifiedLines.Add($"M190 S{bedTarget} ; wait for bed");
@@ -238,7 +315,6 @@ namespace _3dPrinterPoster
                     if (changeChamber) modifiedLines.Add($"M191 S{chamberTarget} ; wait for chamber");
                   }
 
-                  // Update last-knowns only when we actually commanded a change
                   if (changeNozzle) lastNozzleTemp = nozzleTarget;
                   if (changeBed) lastBedTemp = bedTarget;
                   if (changeChamber) lastChamberTemp = chamberTarget;
@@ -258,33 +334,26 @@ namespace _3dPrinterPoster
 
                 if (farg)
                 {
-                  Console.WriteLine("Layer: " + currentLayer);
                   bool xarg = fp.GetArgument(line, "X", out argument);
                   bool yarg = fp.GetArgument(line, "Y", out argument);
                   bool earg = fp.GetArgument(line, "E", out argument);
 
                   if (line.StartsWith("G1 F") || (xarg && yarg && earg))
                   {
-                    //int currentSpeed = Speeds[Speeds.Count - 1]; // default to last speed
-                    int currentSpeed = currentSettings.SpeedByLayer[currentSettings.SpeedByLayer.Count - 1].Speed; // default to last speed
-                    if (currentLayer - 1 < currentSettings.SpeedByLayer.Count && currentLayer > 0)
-                    {
-                      currentSpeed = currentSettings.SpeedByLayer[currentLayer - 1].Speed; // get speed for current layer
-                    }
+                    int currentSpeed = currentSettings.GetSpeedForLayer(currentLayer);
 
                     if (fCmd > currentSpeed * 60)
                     {
                       fp.ReplaceArgument(modifiedLine, "F", currentSpeed * 60, out modifiedLine, "F0");
 
-                      string layerComment = currentLayer switch
-                      {
-                        1 => "first layer",
-                        2 => "second layer",
-                        3 => "third layer",
-                        _ => "subsequent layers"
-                      };
+                      var rule = currentSettings.GetSpeedRuleForLayer(currentLayer);
+                      int ruleLayer = rule?.Layer ?? -1;
 
-                      modifiedLine += $" ; feedrate set to {currentSpeed * 60}mm/min {currentSpeed}mm/sec for test {layerComment} - modified by 3D Printer Poster";
+                      string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
+
+                      modifiedLine +=
+                        $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s) at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
+
                       modifiedLines.Add(modifiedLine);
                       continue;
                     }
@@ -344,6 +413,20 @@ namespace _3dPrinterPoster
           }
         }
       }
+    }
+
+    private static string Ordinal(int n)
+    {
+      if (n <= 0) return n.ToString();
+      int mod100 = n % 100;
+      if (mod100 is 11 or 12 or 13) return $"{n}th";
+      return (n % 10) switch
+      {
+        1 => $"{n}st",
+        2 => $"{n}nd",
+        3 => $"{n}rd",
+        _ => $"{n}th"
+      };
     }
 
     private void btnOpenSettingsFile_Click(object sender, EventArgs e)
