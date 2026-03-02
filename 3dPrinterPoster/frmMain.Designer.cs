@@ -33,6 +33,7 @@
       btnSaveSettings = new Button();
       btnSaveSettingsFileAs = new Button();
       chkIncludeG29 = new CheckBox();
+      btnTest = new Button();
       SuspendLayout();
       // 
       // btnOpenFile
@@ -84,11 +85,22 @@
       chkIncludeG29.Text = "Include G29 (Bed Leveling)";
       chkIncludeG29.UseVisualStyleBackColor = true;
       // 
+      // btnTest
+      // 
+      btnTest.Location = new Point(192, 497);
+      btnTest.Name = "btnTest";
+      btnTest.Size = new Size(438, 46);
+      btnTest.TabIndex = 5;
+      btnTest.Text = "Test";
+      btnTest.UseVisualStyleBackColor = true;
+      btnTest.Click += btnTest_Click;
+      // 
       // frmMain
       // 
       AutoScaleDimensions = new SizeF(13F, 32F);
       AutoScaleMode = AutoScaleMode.Font;
       ClientSize = new Size(2042, 1448);
+      Controls.Add(btnTest);
       Controls.Add(chkIncludeG29);
       Controls.Add(btnSaveSettingsFileAs);
       Controls.Add(btnSaveSettings);
@@ -108,5 +120,6 @@
     private Button btnSaveSettings;
     private Button btnSaveSettingsFileAs;
     private CheckBox chkIncludeG29;
+    private Button btnTest;
   }
 }

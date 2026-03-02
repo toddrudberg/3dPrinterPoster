@@ -26,6 +26,11 @@ namespace _3dPrinterPoster
     public double LayerHeight { get; set; } = 0.3;
 
     [Category("Thermals")]
+    [DisplayName("Chamber and Bed Hold")]
+    [Description("How long do you want to hold the Chamber and Bed before starting the Print (min)?")]
+    public int ChamberHold { get; set; } = 10;
+
+    [Category("Thermals")]
     [DisplayName("Chamber Temp (°C)")]
     [Description("Single chamber target in °C. Leave blank (null) to not set.")]
     public int? ChamberTempC { get; set; } = null;
@@ -35,6 +40,15 @@ namespace _3dPrinterPoster
     [Editor(typeof(CollectionEditor), typeof(UITypeEditor))]
     [Description("Layer-indexed bed temperature targets.")]
     public List<LayerTempSetting> BedTempByLayer { get; set; } = new();
+
+    [Category("Thermals")]
+    [DisplayName("Support Interface Nozzle Temp (°C)")]
+    [Editor(typeof(CollectionEditor), typeof(UITypeEditor))]
+    public int SupportInterfaceNozzleTemp { get; set; } = new();
+
+    [Category("Thermals")]
+    [DisplayName("Apply Support Interface Nozzle Temp")]
+    public bool ApplySupportInterfaceNozzleTemp { get; set; } = false;
 
     [Category("Thermals")]
     [DisplayName("Nozzle Temp by Layer")]
@@ -139,41 +153,42 @@ namespace _3dPrinterPoster
     }
 
 
-    public PrintSettings Clone()
-    {
-      return new PrintSettings
-      {
-        ProfileName = this.ProfileName,
-        Material = this.Material,
-        Printer = this.Printer,
-        LayerHeight = this.LayerHeight,
-        ChamberTempC = this.ChamberTempC,
-        BedTempByLayer = this.BedTempByLayer
-              .Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp })
-              .ToList(),
-        NozzleTempByLayer = this.NozzleTempByLayer
-              .Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp })
-              .ToList(),
-        SpeedByLayer = this.SpeedByLayer
-              .Select(x => new LayerSpeedSetting { Layer = x.Layer, Speed = x.Speed })
-              .ToList()
-      };
-    }
+    //public PrintSettings Clone()
+    //{
+    //  return new PrintSettings
+    //  {
+    //    ProfileName = this.ProfileName,
+    //    Material = this.Material,
+    //    Printer = this.Printer,
+    //    ChamberHold = this.ChamberHold,
+    //    LayerHeight = this.LayerHeight,
+    //    ChamberTempC = this.ChamberTempC,
+    //    BedTempByLayer = this.BedTempByLayer
+    //          .Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp })
+    //          .ToList(),
+    //    NozzleTempByLayer = this.NozzleTempByLayer
+    //          .Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp })
+    //          .ToList(),
+    //    SpeedByLayer = this.SpeedByLayer
+    //          .Select(x => new LayerSpeedSetting { Layer = x.Layer, Speed = x.Speed })
+    //          .ToList()
+    //  };
+    //}
 
-    public void CopyFrom(PrintSettings other)
-    {
-      if (other == null) throw new ArgumentNullException(nameof(other));
+    //public void CopyFrom(PrintSettings other)
+    //{
+    //  if (other == null) throw new ArgumentNullException(nameof(other));
 
-      ProfileName = other.ProfileName;
-      Material = other.Material;
-      Printer = other.Printer;
-      LayerHeight = other.LayerHeight;
-      ChamberTempC = other.ChamberTempC;
+    //  ProfileName = other.ProfileName;
+    //  Material = other.Material;
+    //  Printer = other.Printer;
+    //  LayerHeight = other.LayerHeight;
+    //  ChamberTempC = other.ChamberTempC;
 
-      BedTempByLayer = other.BedTempByLayer.Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp }).ToList();
-      NozzleTempByLayer = other.NozzleTempByLayer.Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp }).ToList();
-      SpeedByLayer = other.SpeedByLayer.Select(x => new LayerSpeedSetting { Layer = x.Layer, Speed = x.Speed }).ToList();
-    }
+    //  BedTempByLayer = other.BedTempByLayer.Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp }).ToList();
+    //  NozzleTempByLayer = other.NozzleTempByLayer.Select(x => new LayerTempSetting { Layer = x.Layer, Temp = x.Temp }).ToList();
+    //  SpeedByLayer = other.SpeedByLayer.Select(x => new LayerSpeedSetting { Layer = x.Layer, Speed = x.Speed }).ToList();
+    //}
 
     public int GetSpeedForLayer(int layer)
     {
@@ -261,21 +276,6 @@ namespace _3dPrinterPoster
       SortAll();
 
       string json = JsonSerializer.Serialize(this, options);
-      File.WriteAllText(path, json);
-    }
-
-    public static void SaveAs(string path, PrintSettings optionsIn)
-    {
-      var options = new JsonSerializerOptions
-      {
-        WriteIndented = true,
-        Converters =
-        {
-          new JsonStringEnumConverter()
-        }
-      };
-
-      string json = JsonSerializer.Serialize(optionsIn, options);
       File.WriteAllText(path, json);
     }
   }
