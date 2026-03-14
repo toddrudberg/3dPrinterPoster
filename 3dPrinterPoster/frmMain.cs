@@ -36,16 +36,39 @@ namespace _3dPrinterPoster
     [DllImport("kernel32.dll")]
     static extern bool AllocConsole();
 
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+
+
     private void frmMain_Load(object sender, EventArgs e)
     {
-      AllocConsole();
+
+         void ArrangeWindows()
+      {
+        var screen = Screen.PrimaryScreen.WorkingArea;
+
+        int halfWidth = screen.Width / 2;
+        int height = screen.Height;
+
+        // Move WinForms window to left half
+        this.Location = new Point(screen.Left, screen.Top);
+        this.Size = new Size(halfWidth, height);
+
+        // Move console to right half
+        IntPtr consoleHandle = GetConsoleWindow();
+        MoveWindow(consoleHandle, screen.Left + halfWidth, screen.Top, halfWidth, height, true);
+      }
+
+    AllocConsole();
 
       formSettings = formSettings.LoadFormSettings();
 
       void CenterHorizontally(Control ctrl)
       {
         if (ctrl.Parent == null) return;
-
         ctrl.Left = (ctrl.Parent.ClientSize.Width - ctrl.Width) / 2;
       }
 
@@ -53,7 +76,7 @@ namespace _3dPrinterPoster
       CenterHorizontally(linkLabel1);
       linkLabel1.Visible = false;
 
-
+      ArrangeWindows();
     }
 
     public frmMain()
