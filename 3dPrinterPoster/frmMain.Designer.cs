@@ -29,15 +29,12 @@
     private void InitializeComponent()
     {
       btnOpenFile = new Button();
-      btnOpenSettingsFile = new Button();
-      btnSaveSettings = new Button();
-      btnSaveSettingsFileAs = new Button();
-      chkIncludeG29 = new CheckBox();
+      linkLabel1 = new LinkLabel();
       SuspendLayout();
       // 
       // btnOpenFile
       // 
-      btnOpenFile.Location = new Point(192, 314);
+      btnOpenFile.Location = new Point(676, 60);
       btnOpenFile.Name = "btnOpenFile";
       btnOpenFile.Size = new Size(438, 46);
       btnOpenFile.TabIndex = 0;
@@ -45,68 +42,35 @@
       btnOpenFile.UseVisualStyleBackColor = true;
       btnOpenFile.Click += btnOpenFile_Click;
       // 
-      // btnOpenSettingsFile
+      // linkLabel1
       // 
-      btnOpenSettingsFile.Location = new Point(192, 117);
-      btnOpenSettingsFile.Name = "btnOpenSettingsFile";
-      btnOpenSettingsFile.Size = new Size(438, 46);
-      btnOpenSettingsFile.TabIndex = 1;
-      btnOpenSettingsFile.Text = "Open Settings File";
-      btnOpenSettingsFile.UseVisualStyleBackColor = true;
-      btnOpenSettingsFile.Click += btnOpenSettingsFile_Click;
-      // 
-      // btnSaveSettings
-      // 
-      btnSaveSettings.Location = new Point(192, 169);
-      btnSaveSettings.Name = "btnSaveSettings";
-      btnSaveSettings.Size = new Size(438, 46);
-      btnSaveSettings.TabIndex = 2;
-      btnSaveSettings.Text = "Save Settings File";
-      btnSaveSettings.UseVisualStyleBackColor = true;
-      // 
-      // btnSaveSettingsFileAs
-      // 
-      btnSaveSettingsFileAs.Location = new Point(192, 221);
-      btnSaveSettingsFileAs.Name = "btnSaveSettingsFileAs";
-      btnSaveSettingsFileAs.Size = new Size(438, 46);
-      btnSaveSettingsFileAs.TabIndex = 3;
-      btnSaveSettingsFileAs.Text = "Save Settings File As,,,";
-      btnSaveSettingsFileAs.UseVisualStyleBackColor = true;
-      btnSaveSettingsFileAs.Click += btnSaveSettingsFileAs_Click;
-      // 
-      // chkIncludeG29
-      // 
-      chkIncludeG29.AutoSize = true;
-      chkIncludeG29.Location = new Point(691, 328);
-      chkIncludeG29.Name = "chkIncludeG29";
-      chkIncludeG29.Size = new Size(331, 36);
-      chkIncludeG29.TabIndex = 4;
-      chkIncludeG29.Text = "Include G29 (Bed Leveling)";
-      chkIncludeG29.UseVisualStyleBackColor = true;
+      linkLabel1.Location = new Point(147, 109);
+      linkLabel1.Name = "linkLabel1";
+      linkLabel1.Size = new Size(1822, 43);
+      linkLabel1.TabIndex = 5;
+      linkLabel1.TabStop = true;
+      linkLabel1.Text = "linkLabel1";
+      linkLabel1.TextAlign = ContentAlignment.MiddleCenter;
+      linkLabel1.MouseUp += linkLabel1_MouseUp;
       // 
       // frmMain
       // 
       AutoScaleDimensions = new SizeF(13F, 32F);
       AutoScaleMode = AutoScaleMode.Font;
+      BackgroundImage = Properties.Resources._3dConverter;
+      BackgroundImageLayout = ImageLayout.Center;
       ClientSize = new Size(2042, 1448);
-      Controls.Add(chkIncludeG29);
-      Controls.Add(btnSaveSettingsFileAs);
-      Controls.Add(btnSaveSettings);
-      Controls.Add(btnOpenSettingsFile);
+      Controls.Add(linkLabel1);
       Controls.Add(btnOpenFile);
       Name = "frmMain";
       Text = "Form1";
       Load += frmMain_Load;
       ResumeLayout(false);
-      PerformLayout();
     }
 
     #endregion
 
     private Button btnOpenFile;
-    private Button btnOpenSettingsFile;
-    private Button btnSaveSettings;
-    private Button btnSaveSettingsFileAs;
-    private CheckBox chkIncludeG29;
+    private LinkLabel linkLabel1;
   }
 }

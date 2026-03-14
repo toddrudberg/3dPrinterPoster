@@ -26,7 +26,7 @@ namespace _3dPrinterPoster
       InitializeComponent();
 
       _original = settings;
-      Options = settings.Clone();   // <-- edit a copy
+      Options = _original;// settings.Clone();   // <-- edit a copy
 
       propertyGrid1.SelectedObject = Options;
 
