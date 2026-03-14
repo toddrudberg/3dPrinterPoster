@@ -11,6 +11,14 @@ namespace _3dPrinterPoster
 {
   public class PrintSettings
   {
+
+    [Category("Bed Leveling")]
+    [DisplayName("Autolevel Bed?")]
+    [Description("Autobed leveling is time consuming and if your bed is level, skip it.")]
+    [DefaultValue(false)]
+    public bool bedLeveling { get; set; } = false;
+
+
     [Category("Identification")]
     [DisplayName("Profile Name")]
     public string ProfileName { get; set; } = "default";
@@ -61,6 +69,19 @@ namespace _3dPrinterPoster
     [Editor(typeof(CollectionEditor), typeof(UITypeEditor))]
     [Description("Layer-indexed speed targets (mm/s).")]
     public List<LayerSpeedSetting> SpeedByLayer { get; set; } = new();
+
+    [Category("Fans")]
+    [DisplayName("Part Cooling Fan")]
+    [Description("Enable Part Cooling Fan? Should be off for any Nylons.")]
+    [DefaultValue(false)]
+    public bool EnablePartCoolingFan { get; set; } = false;
+
+    [Category("Fans")]
+    [DisplayName("Chamber Exhaust Fan Setting %")]
+    [Description("Set it low for Nylons.")]
+    [DefaultValue(100)]
+    public int ChamberFanPercent { get; set; } = 100;
+
 
     // --- Add these settings (optional but recommended) ---
 

@@ -1,19 +1,19 @@
 using Newtonsoft.Json;
-using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
-using System.Windows.Forms;
-using static System.Windows.Forms.Design.AxImporter;
-
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Printing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Drawing.Printing;
+using System.Windows.Forms;
+using static System.Windows.Forms.Design.AxImporter;
 
 
 namespace _3dPrinterPoster
@@ -41,21 +41,19 @@ namespace _3dPrinterPoster
       AllocConsole();
 
       formSettings = formSettings.LoadFormSettings();
-      if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
+
+      void CenterHorizontally(Control ctrl)
       {
-        try
-        {
-          //string json = File.ReadAllText(formSettings.LastSettingsFile);
-          currentSettings = PrintSettings.Load(formSettings.LastSettingsFile); //JsonConvert.DeserializeObject<PrintSettings>(json);
-          MessageBox.Show($"Loaded settings profile: {currentSettings.ProfileName}",
-              "Settings Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-        catch (Exception ex)
-        {
-          MessageBox.Show($"Failed to load settings:\n{ex.Message}",
-              "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
+        if (ctrl.Parent == null) return;
+
+        ctrl.Left = (ctrl.Parent.ClientSize.Width - ctrl.Width) / 2;
       }
+
+      CenterHorizontally(btnOpenFile);
+      CenterHorizontally(linkLabel1);
+      linkLabel1.Visible = false;
+
+
     }
 
     public frmMain()
@@ -65,6 +63,7 @@ namespace _3dPrinterPoster
 
     private void btnOpenFile_Click(object sender, EventArgs e)
     {
+      this.Enabled = false;
       ToddUtils.FileParser.cFileParse fp = new();
 
       using (var openFileDialog = new OpenFileDialog())
@@ -143,135 +142,34 @@ namespace _3dPrinterPoster
           formSettings.LastGcodeFile = path;
           formSettings.SaveFormSettings(); // Save the last Gcode file path
 
-//Hop out and do the thing:
-          ModifyPPG.DoTheThing(path, currentSettings, chkIncludeG29.Checked);
+          //Hop out and do the thing:
 
+          string directory = Path.GetDirectoryName(path);
+          string filenameWithoutExt = Path.GetFileNameWithoutExtension(path);
+          string newPath = Path.Combine(directory, $"{filenameWithoutExt}_mod.gcode");
+
+          ModifyPPG.DoTheThing(path, currentSettings, newPath);
+          linkLabel1.Text = newPath;
+          linkLabel1.Visible = true;
+          Console.WriteLine($"Modified file saved as:\n{newPath}", "Save Successful", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
       }
+      this.Enabled = true;
     }
 
-
-
-    private void btnOpenSettingsFile_Click(object sender, EventArgs e)
+    private void linkLabel1_MouseUp(object sender, MouseEventArgs e)
     {
-      using (OpenFileDialog openFileDialog = new OpenFileDialog())
+      string path = linkLabel1.Text;
+
+      if (!File.Exists(path)) return;
+
+      if (e.Button == MouseButtons.Left)
       {
-
-        openFileDialog.Filter = "Settings files (*.settings.json)|*.settings.json|All files (*.*)|*.*";
-        openFileDialog.Title = "Open Print Settings File";
-
-        // If there's a last file, set its folder and filename
-        if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
-        {
-          openFileDialog.InitialDirectory = Path.GetDirectoryName(formSettings.LastSettingsFile);
-          openFileDialog.FileName = Path.GetFileName(formSettings.LastSettingsFile);
-        }
-
-        if (openFileDialog.ShowDialog() == DialogResult.OK)
-        {
-          try
-          {
-            string json = File.ReadAllText(openFileDialog.FileName);
-            currentSettings = JsonConvert.DeserializeObject<PrintSettings>(json);
-            formSettings.LastSettingsFile = openFileDialog.FileName;
-            formSettings.SaveFormSettings(); // Save the last settings file path
-
-            MessageBox.Show($"Loaded settings profile: {currentSettings.ProfileName}",
-                "Settings Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
-          }
-          catch (Exception ex)
-          {
-            MessageBox.Show($"Failed to load settings:\n{ex.Message}",
-                "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-          }
-        }
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
       }
-    }
-
-    private void btnSaveSettingsFileAs_Click(object sender, EventArgs e)
-    {
-      using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+      else if (e.Button == MouseButtons.Right)
       {
-        saveFileDialog.Title = "Save Settings File As";
-        saveFileDialog.Filter = "Settings files (*.settings.json)|*.settings.json|All files (*.*)|*.*";
-        saveFileDialog.DefaultExt = "settings.json";
-
-        // Default to current settings file folder if available
-        if (!string.IsNullOrEmpty(formSettings.LastSettingsFile))
-        {
-          saveFileDialog.InitialDirectory = Path.GetDirectoryName(formSettings.LastSettingsFile);
-          saveFileDialog.FileName = Path.GetFileName(formSettings.LastSettingsFile);
-        }
-        else
-        {
-          saveFileDialog.FileName = "newProfile.settings.json";
-        }
-
-        if (saveFileDialog.ShowDialog() == DialogResult.OK)
-        {
-          try
-          {
-            // Serialize current settings
-            string json = JsonConvert.SerializeObject(currentSettings, Formatting.Indented);
-            File.WriteAllText(saveFileDialog.FileName, json);
-
-            // Update formSettings
-            formSettings.LastSettingsFile = saveFileDialog.FileName;
-
-            MessageBox.Show("Settings saved successfully.", "Success",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-          }
-          catch (Exception ex)
-          {
-            MessageBox.Show($"Failed to save settings:\n{ex.Message}", "Error",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-          }
-        }
-      }
-    }
-
-    private void btnTest_Click(object sender, EventArgs e)
-    {
-      using (OpenFileDialog openFileDialog = new OpenFileDialog())
-      {
-        openFileDialog.Filter = "GCode files (*.gcode)|*.gcode|All files (*.*)|*.*";
-        openFileDialog.Title = "Open GCode File";
-
-        // If there's a last file, set its folder and filename
-        if (!string.IsNullOrEmpty(formSettings.LastGcodeFile))
-        {
-          openFileDialog.InitialDirectory = Path.GetDirectoryName(formSettings.LastGcodeFile);
-          openFileDialog.FileName = Path.GetFileName(formSettings.LastGcodeFile);
-        }
-
-        if (openFileDialog.ShowDialog() == DialogResult.OK)
-        {
-          string path = openFileDialog.FileName;
-          formSettings.LastGcodeFile = path;
-          formSettings.SaveFormSettings(); // Save the last Gcode file path
-
-
-          //string[] lines = File.ReadAllLines(path);
-
-          List<string> lines = File.ReadAllLines(path).ToList();
-          int numSupportInterfaceFeatures = 0;
-
-          foreach (string line in lines)
-          {
-            if( line.Contains("FEATURE:"))
-            {
-              string sFeature = line.Replace(" ", "");
-              string output = line.Substring(sFeature.IndexOf("FEATURE:"));
-
-              if( sFeature.Contains("Supportinterface"))
-              {
-                numSupportInterfaceFeatures++;
-              }
-              Console.WriteLine(output);
-            }
-          }
-          Console.WriteLine($"Support Interface Count: {numSupportInterfaceFeatures}");
-        }
+        Process.Start("explorer.exe", "/select,\"" + path + "\"");
       }
     }
   }

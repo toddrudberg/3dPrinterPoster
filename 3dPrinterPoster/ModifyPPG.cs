@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Emit;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -12,29 +13,124 @@ namespace _3dPrinterPoster
   internal class ModifyPPG
   {
 
-    public static void DoTheThing(string filename, PrintSettings options, bool includeG29)
+    public static void DoTheThing(string filename, PrintSettings options, string newPath)
     {
+
+
+      List<string> SetCoolingFanLevels(List<string> input, PrintSettings options)
+      {
+        List<string> result = new List<string>();
+        ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+        foreach (string line in input)
+        {
+          string thisline = line;
+          if (line.Contains("M106"))
+          {
+            if (line.Contains("P"))
+            {
+              fp.GetArgument(line, "P", out double pcode, false);
+
+              switch ((int)pcode)
+              {
+                case 0:
+                  {
+                    if (options.EnablePartCoolingFan)
+                    {
+                      thisline = line; // do nothing
+                    }
+                    else
+                    {
+                      thisline = "M106 P0 S0"; //turn part fan off!
+                    }
+                    break;
+                  }
+                case 1: { break; }
+                case 2: { break; }
+                case 3:
+                  {
+                    fp.GetArgument(line, "S", out double scode, false);
+                    if (scode > 0)
+                    {
+                      fp.ReplaceArgument(thisline, "S", options.ChamberFanPercent * 255.0 / 100.0, out thisline, "F0");
+                    }
+                    break;
+                  }
+              }
+            }
+            else
+            {
+              fp.GetArgument(line, "S", out double scode, false);
+              if (scode > 0)
+              {
+                if (options.EnablePartCoolingFan)
+                {
+                  thisline = line;
+                }
+                else
+                {
+                  thisline = "M106 S0";
+                }
+              }
+            }
+          }
+          result.Add(thisline);
+        }
+        return result;
+      }
+      List<string> InsertOperatorMessages(List<string> input, PrintSettings options)
+      {
+        string CreateOperatorMessage(string line)
+        {
+          int zIndex = line.IndexOf("Z_HEIGHT:");
+          int layerIndex = line.IndexOf("layer");
+
+          if (zIndex == -1 || layerIndex == -1)
+            return null;
+
+          // Extract Z height
+          int zStart = zIndex + "Z_HEIGHT:".Length;
+          int zEnd = line.IndexOf(";", zStart);
+          string zHeight = line.Substring(zStart, zEnd - zStart).Trim();
+
+          // Extract layer number
+          int layerStart = layerIndex + "layer".Length;
+          string layerNumber = line.Substring(layerStart).Trim();
+
+          return $"M118 Layer {layerNumber}  T={zHeight}mm";
+        }
+
+        List<string> result = new List<string>();
+        ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+        foreach (string line in input)
+        {
+
+          if( line.StartsWith("G4 P"))
+          {
+            fp.GetArgument(line, "P", out double pcode, false);
+
+            result.Add($"M118 Pausing for {pcode / 1000 / 60:F1} minutes");
+          }
+          if (line.Contains("Z_HEIGHT"))
+          {
+            result.Add(CreateOperatorMessage(line));
+          }
+
+          result.Add(line);
+        }
+        return result;
+      }
+
       List<string> lines = File.ReadAllLines(filename).ToList();
-
-
-      List<string> output = MainOptionsModifier(lines, options, includeG29);
+      List<string> output = MainOptionsModifier(lines, options);
       if (output == null)
         return;
 
       output = SetSupportInterfaceTemp(output, options);
+      output = SetCoolingFanLevels(output, options);
+      output = InsertOperatorMessages(output, options);
 
-
-
-
-
-      string path = filename;
-      string directory = Path.GetDirectoryName(path);
-      string filenameWithoutExt = Path.GetFileNameWithoutExtension(path);
-      string newPath = Path.Combine(directory, $"{filenameWithoutExt}_mod.gcode");
 
       File.WriteAllLines(newPath, output);
-
-      Console.WriteLine($"Modified file saved as:\n{newPath}", "Save Successful", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
 
@@ -93,7 +189,7 @@ namespace _3dPrinterPoster
     }
 
 
-    private static List<string> MainOptionsModifier(List<string> inputLines, PrintSettings options, bool includeG29)
+    private static List<string> MainOptionsModifier(List<string> inputLines, PrintSettings options)
     {
       ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
 
@@ -121,7 +217,7 @@ namespace _3dPrinterPoster
           if (trimmed.StartsWith("M141")) return false;
 
           // G29 is optional via checkbox
-          if (trimmed.StartsWith("G29") && !includeG29) return false;
+          if (trimmed.StartsWith("G29") && !options.bedLeveling) return false;
 
           return true;
         }).ToList();
@@ -155,7 +251,7 @@ namespace _3dPrinterPoster
             continue; // Skip further processing if execution has ended
           }
 
-          if (options.Printer == PrinterType.QIDI_X_MAX_3 && includeG29 && line.Trim().Contains("G29"))
+          if (options.Printer == PrinterType.QIDI_X_MAX_3 && options.bedLeveling && line.Trim().Contains("G29"))
           {
             modifiedLines.Add($"M190 S{bedTemp} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
             modifiedLines.Add(line + " ; G29 included by User Preference.");
@@ -190,7 +286,7 @@ namespace _3dPrinterPoster
           if (options.Printer == PrinterType.QIDI_Q1_Pro && line.IndexOf("PRINT_START", StringComparison.OrdinalIgnoreCase) >= 0)
           {
 
-            if (includeG29)
+            if (options.bedLeveling)
             {
               // Build PRINT_START with only the params we have
               if (chamberTemp > 0)
