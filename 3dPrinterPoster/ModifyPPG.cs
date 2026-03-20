@@ -16,7 +16,59 @@ namespace _3dPrinterPoster
     public static void DoTheThing(string filename, PrintSettings options, string newPath)
     {
 
+      List<string> SetSupportInterfaceTemp(List<string> inputLines, PrintSettings options)
+      {
+        List<string> result = new List<string>();
 
+        ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+
+        if (options.ApplySupportInterfaceNozzleTemp)
+        {
+          int currentNozzleTemp;
+          string lastNozzleTempCommand = "";
+          bool inSupportInterfaceFeature = false;
+
+          for (int ii = 0; ii < inputLines.Count; ii++)
+          {
+            string line = inputLines[ii];
+            result.Add(line);
+
+            if (line.Contains("M104") || line.Contains("M109"))
+            {
+              fp.GetArgument(line, "S", out double dNozzleTemp, true);
+              currentNozzleTemp = (int)dNozzleTemp;
+              lastNozzleTempCommand = line;
+            }
+
+            if (line.Contains("FEATURE: "))
+            {
+              line = line.Replace(" ", "");
+              if (line.Contains("Supportinterface"))
+              {
+                if (!inSupportInterfaceFeature)
+                {
+                  result.Add($"M104 S{options.SupportInterfaceNozzleTemp} ; (Lowering temp for support interface)");
+                  inSupportInterfaceFeature |= true;
+                }
+              }
+              else
+              {
+                if (inSupportInterfaceFeature)
+                {
+                  result.Add(lastNozzleTempCommand.Replace("M104", "M104") + " ; (Raising temp after support interface)");
+                  inSupportInterfaceFeature = false;
+                }
+              }
+            }
+          }
+          return result;
+        }
+        else
+        {
+          return inputLines;
+        }
+
+      }
       List<string> SetCoolingFanLevels(List<string> input, PrintSettings options)
       {
         List<string> result = new List<string>();
@@ -119,74 +171,38 @@ namespace _3dPrinterPoster
         }
         return result;
       }
+      List<string> CleanUpKnownBadCommands(List<string> input, PrintSettings options)
+      {
+        List<string> result = new List<string>();
+        bool unknownCode = false;
+        foreach( string s in input)
+        {
+          unknownCode = unknownCode || s.Contains("G17");
+
+
+          if(!unknownCode)
+            result.Add(s);
+        }
+        return result;
+      }
+
 
       List<string> lines = File.ReadAllLines(filename).ToList();
       List<string> output = MainOptionsModifier(lines, options);
+
       if (output == null)
         return;
 
       output = SetSupportInterfaceTemp(output, options);
       output = SetCoolingFanLevels(output, options);
       output = InsertOperatorMessages(output, options);
-
+      output = CleanUpKnownBadCommands(output, options);
 
       File.WriteAllLines(newPath, output);
     }
 
 
-    private static List<string> SetSupportInterfaceTemp(List<string> inputLines, PrintSettings options)
-    {
-      List<string> result = new List<string>();
 
-      ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
-
-      if(options.ApplySupportInterfaceNozzleTemp)
-      {
-        int currentNozzleTemp;
-        string lastNozzleTempCommand = "";
-        bool inSupportInterfaceFeature = false;
-
-        for(int ii = 0; ii < inputLines.Count; ii++)
-        {
-          string line = inputLines[ii];
-          result.Add(line);
-
-          if( line.Contains("M104") || line.Contains("M109"))
-          {
-            fp.GetArgument(line, "S", out double dNozzleTemp, true);
-            currentNozzleTemp = (int) dNozzleTemp;
-            lastNozzleTempCommand = line;
-          }
-
-          if (line.Contains("FEATURE: "))
-          {
-            line = line.Replace(" ", "");
-            if(line.Contains("Supportinterface"))
-            {
-              if (!inSupportInterfaceFeature)
-              {
-                result.Add($"M104 S{options.SupportInterfaceNozzleTemp} ; (Lowering temp for support interface)");
-                inSupportInterfaceFeature |= true;
-              }
-            }
-            else
-            {
-              if(inSupportInterfaceFeature)
-              {
-                result.Add(lastNozzleTempCommand.Replace("M104", "M104") + " ; (Raising temp after support interface)");
-                inSupportInterfaceFeature = false;
-              }
-            }
-          }
-        }
-        return result;
-      }
-      else
-      {
-        return inputLines;
-      }
-
-    }
 
 
     private static List<string> MainOptionsModifier(List<string> inputLines, PrintSettings options)
