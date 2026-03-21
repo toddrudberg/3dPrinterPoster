@@ -174,12 +174,10 @@ namespace _3dPrinterPoster
       List<string> CleanUpKnownBadCommands(List<string> input, PrintSettings options)
       {
         List<string> result = new List<string>();
-        bool unknownCode = false;
         foreach( string s in input)
         {
+          bool unknownCode = false;
           unknownCode = unknownCode || s.Contains("G17");
-
-
           if(!unknownCode)
             result.Add(s);
         }
@@ -316,33 +314,30 @@ namespace _3dPrinterPoster
 
               string newPrintStart = "PRINT_START " + string.Join(" ", parts);
               modifiedLines.Add(newPrintStart + " ; modified by 3D Printer Poster");
-
-              // IMPORTANT: do NOT emit your own M140/M104/M141/M190/M109/M191 here
-              // if your PRINT_START macro already handles heating/mesh/homing.
             }
-            //else
+
+            modifiedLines.Add("M104 S100 ; Set Nozzle to a low temp while the bed and chamber catchup (non-blocking).");
+            // Manual warm-up path (no PRINT_START)
+            modifiedLines.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
+            if (chamberTemp > 0)
+              modifiedLines.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
+
+            modifiedLines.Add($"M190 S{bedTemp} ; wait for bed");
+            if (chamberTemp > 0)
+              modifiedLines.Add($"M191 S{chamberTemp} ; wait for chamber");
+
+            if (options.ChamberHold > 0)
             {
-              // Manual warm-up path (no PRINT_START)
-              modifiedLines.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
-              if (chamberTemp > 0)
-                modifiedLines.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
-
-              modifiedLines.Add($"M190 S{bedTemp} ; wait for bed");
-              if (chamberTemp > 0)
-                modifiedLines.Add($"M191 S{chamberTemp} ; wait for chamber");
-
-              if (options.ChamberHold > 0)
-              {
-                modifiedLines.Add($"G4 P{options.ChamberHold * 60 * 1000}");
-              }
-
-              modifiedLines.Add($"M104 S{nozzleTemp} ; start nozzle preheat (non-blocking)");
-
-              modifiedLines.Add($"M109 S{nozzleTemp} ; wait for nozzle");
-
-
-              modifiedLines.Add("; " + line); // keep original as comment for traceability
+              modifiedLines.Add($"G4 P{options.ChamberHold * 60 * 1000}");
             }
+
+            modifiedLines.Add($"M104 S{nozzleTemp} ; start nozzle preheat (non-blocking)");
+
+            modifiedLines.Add($"M109 S{nozzleTemp} ; wait for nozzle");
+
+
+            modifiedLines.Add("; " + line); // keep original as comment for traceability
+            
             continue;
           }
 
