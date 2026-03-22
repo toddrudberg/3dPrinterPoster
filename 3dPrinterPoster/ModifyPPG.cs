@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using System.Windows.Forms;
+using static System.Windows.Forms.LinkLabel;
 
 namespace _3dPrinterPoster
 {
@@ -15,7 +16,133 @@ namespace _3dPrinterPoster
 
     public static void DoTheThing(string filename, PrintSettings options, string newPath)
     {
+      List<string> lines = File.ReadAllLines(filename).ToList();
+      bool isFromQidiStudio = lines.Any(line => line.Contains("QIDIStudio"));
+      ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
 
+      #region Utilities
+      string ClearWhiteSpace(string line )
+      {
+        var sb = new StringBuilder(line.Length);
+        foreach (char c in line)
+        {
+          if (!char.IsWhiteSpace(c))
+            sb.Append(c);
+        }
+        return sb.ToString();
+      }
+
+      int CheckCurrentLayer(PrintSettings options, int currentLayer, string line)
+      {
+
+        string layerTag = isFromQidiStudio ? ";Z_HEIGHT:" : ";Z:";
+        ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+        string lineNoWS = ClearWhiteSpace(line);
+        
+        if (lineNoWS.StartsWith(layerTag))
+        {
+          lineNoWS = isFromQidiStudio ? lineNoWS.Replace("Z_HEIGHT:", "Z:") : lineNoWS;
+          string ZArgument = "Z:";
+          double currentZ = fp.GetArgument2(lineNoWS, ZArgument);
+          currentLayer = (int)Math.Round(currentZ / options.LayerHeight);
+          if (currentLayer < 1) currentLayer = 1;
+        }
+
+        return currentLayer;
+      }
+            
+      #endregion
+
+
+      List<string> SetFeedRatesByLayer(List<string> inputLines, PrintSettings options)
+      {
+        List<string> result = new List<string>();
+        int currentLayer = 0;
+        
+
+        for (int ii = 0; ii < inputLines.Count; ii++)
+        {
+          string line = inputLines[ii];
+
+          currentLayer = CheckCurrentLayer(options, currentLayer, line);
+          
+          //Override Feedrates
+          if (line.StartsWith("G1"))
+          {
+            double argument;
+            bool farg = fp.GetArgument(line, "F", out argument);
+            double fCmd = argument;
+
+            if (farg)
+            {
+              bool xarg = fp.GetArgument(line, "X", out argument);
+              bool yarg = fp.GetArgument(line, "Y", out argument);
+              bool earg = fp.GetArgument(line, "E", out argument);
+
+              if (line.StartsWith("G1 F") || (xarg && yarg && earg))
+              {
+                int currentSpeed = options.GetSpeedForLayer(currentLayer);
+
+                if (fCmd > currentSpeed * 60)
+                {
+                  fp.ReplaceArgument(line, "F", currentSpeed * 60, out line, "F0");
+
+                  var rule = options.GetSpeedRuleForLayer(currentLayer);
+                  int ruleLayer = rule?.Layer ?? -1;
+
+                  string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
+
+                  line +=
+                    $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s) at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
+
+                  result.Add(line);
+                  continue;
+                }
+              }
+            }
+          }
+          result.Add(line);
+        }
+        return result;
+      }
+      List<string> SetNozzleTempsByLayer(List<stirng> inputLines, PrintSettings options)
+      {
+        List<string> result = new List<string>();
+        int currentLayer = 0;
+        bool nozzleTempSet = false;
+
+        for (int ii = 0; ii < inputLines.Count; ii++)
+        {
+          string line = inputLines[ii];
+
+          currentLayer = CheckCurrentLayer(options, currentLayer, line);
+
+          // Handle initial nozzle temperature before any extrusion (E > 0)
+          if (!nozzleTempSet && options.Printer != PrinterType.QIDI_Q1_Pro)
+          {
+            if (line.Contains("G0") || line.Contains("G1"))
+            {
+              if (fp.GetArgument(line, "E", out double evalue) && evalue > 0)
+              {
+                result.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
+                if (chamberTemp > 0)
+                  line.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
+                result.Add($"M190 S{bedTemp} ; wait for bed");
+                if (chamberTemp > 0)
+                  result.Add($"M191 S{chamberTemp} ; wait for chamber");
+                if (options.ChamberHold > 0)
+                  line.Add($"G4 P{options.ChamberHold * 60 * 1000}");
+
+                result.Add($"M104 S{nozzleTemp} ; start nozzle preheat (non-blocking)");
+                result.Add($"M109 S{nozzleTemp} ; wait for nozzle");
+
+                nozzleTempSet = true;
+              }
+            }
+          }
+        }
+        return result;
+      }
       List<string> SetSupportInterfaceTemp(List<string> inputLines, PrintSettings options)
       {
         List<string> result = new List<string>();
@@ -185,12 +312,13 @@ namespace _3dPrinterPoster
       }
 
 
-      List<string> lines = File.ReadAllLines(filename).ToList();
+
       List<string> output = MainOptionsModifier(lines, options);
 
       if (output == null)
         return;
 
+      output = SetFeedRatesByLayer(output, options);
       output = SetSupportInterfaceTemp(output, options);
       output = SetCoolingFanLevels(output, options);
       output = InsertOperatorMessages(output, options);
@@ -393,41 +521,7 @@ namespace _3dPrinterPoster
 
 
 
-          //Override Feedrates
-          if (line.StartsWith("G1"))
-          {
-            double argument;
-            bool farg = fp.GetArgument(line, "F", out argument);
-            double fCmd = argument;
 
-            if (farg)
-            {
-              bool xarg = fp.GetArgument(line, "X", out argument);
-              bool yarg = fp.GetArgument(line, "Y", out argument);
-              bool earg = fp.GetArgument(line, "E", out argument);
-
-              if (line.StartsWith("G1 F") || (xarg && yarg && earg))
-              {
-                int currentSpeed = options.GetSpeedForLayer(currentLayer);
-
-                if (fCmd > currentSpeed * 60)
-                {
-                  fp.ReplaceArgument(modifiedLine, "F", currentSpeed * 60, out modifiedLine, "F0");
-
-                  var rule = options.GetSpeedRuleForLayer(currentLayer);
-                  int ruleLayer = rule?.Layer ?? -1;
-
-                  string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
-
-                  modifiedLine +=
-                    $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s) at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
-
-                  modifiedLines.Add(modifiedLine);
-                  continue;
-                }
-              }
-            }
-          }
 
 
           if (currentLayer > 0)
