@@ -117,29 +117,7 @@ namespace _3dPrinterPoster
 
           currentLayer = CheckCurrentLayer(options, currentLayer, line);
 
-          // Handle initial nozzle temperature before any extrusion (E > 0)
-          if (!nozzleTempSet && options.Printer != PrinterType.QIDI_Q1_Pro)
-          {
-            if (line.Contains("G0") || line.Contains("G1"))
-            {
-              if (fp.GetArgument(line, "E", out double evalue) && evalue > 0)
-              {
-                result.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
-                if (chamberTemp > 0)
-                  line.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
-                result.Add($"M190 S{bedTemp} ; wait for bed");
-                if (chamberTemp > 0)
-                  result.Add($"M191 S{chamberTemp} ; wait for chamber");
-                if (options.ChamberHold > 0)
-                  line.Add($"G4 P{options.ChamberHold * 60 * 1000}");
 
-                result.Add($"M104 S{nozzleTemp} ; start nozzle preheat (non-blocking)");
-                result.Add($"M109 S{nozzleTemp} ; wait for nozzle");
-
-                nozzleTempSet = true;
-              }
-            }
-          }
         }
         return result;
       }
