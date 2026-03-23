@@ -193,7 +193,8 @@ namespace _3dPrinterPoster
         {
           string line = inputLines[ii];
 
-          currentLayer = CheckCurrentLayer(options, line);
+          if( line.Contains("Z_HEIGHT:"))
+            currentLayer = CheckCurrentLayer(options, line);
           
           //Override Feedrates
           if (line.StartsWith("G1"))
@@ -238,7 +239,6 @@ namespace _3dPrinterPoster
       {
         List<string> result = new List<string>();
         int currentLayer = 0;
-        bool nozzleTempSet = false;
         int lastLayer = 0;
         double lastBedTemp = 0;
         double lastChamberTemp = 0;
@@ -247,7 +247,8 @@ namespace _3dPrinterPoster
         {
           string line = inputLines[ii];
 
-          currentLayer = CheckCurrentLayer(options, line);
+          if(line.Contains("Z_HEIGHT:"))
+            currentLayer = CheckCurrentLayer(options, line);
 
           if (currentLayer != lastLayer)
           {
@@ -405,40 +406,72 @@ namespace _3dPrinterPoster
       }
       List<string> InsertOperatorMessages(List<string> input, PrintSettings options)
       {
-        string CreateOperatorMessage(string line)
+        List<string> CreateOperatorMessages(string line)
         {
+          List<string> messages = new List<string>();
+
           int zIndex = line.IndexOf("Z_HEIGHT:");
           int layerIndex = line.IndexOf("layer");
 
-          if (zIndex == -1 )
-            return null;
+          if (zIndex == -1)
+            return messages;
+
           int currentLayer = CheckCurrentLayer(options, line);
 
           // Extract Z height
           int zStart = zIndex + "Z_HEIGHT:".Length;
           int zEnd = line.Length;
           string zHeight = line.Substring(zStart, zEnd - zStart).Trim();
-          return $"M118 Layer {currentLayer}  T={zHeight}mm";
+
+          messages.Add($"M118 Layer {currentLayer} T={zHeight}mm");
+          var rule = options.GetSpeedRuleForLayer(currentLayer);
+          int ruleLayer = rule?.Layer ?? -1;
+
+          string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
+
+          messages.Add($"M118 SPEED {rule:F1} at {where}");
+
+          int? nozzleTarget = options?.GetNozzleTempForLayer(currentLayer);
+          int? bedTarget = options?.GetBedTempForLayer(currentLayer);
+
+          if (nozzleTarget is int nt)
+          {
+            messages.Add($"M118 NOZZLE {nt}C at {where}");
+          }
+
+          if (bedTarget is int bt)
+          {
+            messages.Add($"M118 BED {bt}C at {where}");
+          }
+
+          return messages;
         }
 
         List<string> result = new List<string>();
         ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+
         foreach (string line in input)
         {
+          if (string.IsNullOrWhiteSpace(line))
+          {
+            result.Add(line);
+            continue;
+          }
 
-          if( line.StartsWith("G4 P"))
+          if (line.StartsWith("G4 P"))
           {
             fp.GetArgument(line, "P", out double pcode, false);
-
             result.Add($"M118 Pausing for {pcode / 1000 / 60:F1} minutes");
           }
+
           if (line.Contains("Z_HEIGHT"))
           {
-            result.Add(CreateOperatorMessage(line));
+            result.AddRange(CreateOperatorMessages(line));
           }
 
           result.Add(line);
         }
+
         return result;
       }
       List<string> CleanUpKnownBadCommands(List<string> input, PrintSettings options)
