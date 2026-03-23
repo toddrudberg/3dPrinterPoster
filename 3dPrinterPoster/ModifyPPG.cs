@@ -50,10 +50,139 @@ namespace _3dPrinterPoster
 
         return currentLayer;
       }
-            
+
       #endregion
 
+      List<string> InitialAndGlobalSettings(List<string> inputLines, PrintSettings options)
+      {
+        List<string> result = new List<string>();
+        #region GlobalSettings
+        string[] lines = inputLines.ToArray();
+        var cleanedLines = lines.Where(line =>
+        {
+          string trimmed = line.TrimStart();
 
+          // Remove any lines that control temps — we'll handle them later
+          if (trimmed.StartsWith("M104")) return false;
+          if (trimmed.StartsWith("M140")) return false;
+          if (trimmed.StartsWith("M109")) return false;
+          if (trimmed.StartsWith("M190")) return false;
+          if (trimmed.StartsWith("M191")) return false;
+          if (trimmed.StartsWith("M141")) return false;
+
+          // G29 is optional via checkbox
+          if (trimmed.StartsWith("G29") && !options.bedLeveling) return false;
+
+          return true;
+        }).ToList();
+        #endregion
+
+        bool nozzleTempSet = false;
+        int? nozzleTarget = options?.GetNozzleTempForLayer(1);
+        int? bedTarget = options?.GetBedTempForLayer(1);
+        int? chamberTarget = (options?.ChamberTempC is > 0) ? options.ChamberTempC : null;
+        bool startUpSetingsComplete = false;
+        bool executionEnd = false;
+
+        for(int i = 0; i < cleanedLines.Count; i++) 
+        {
+          string line = cleanedLines[i];
+          if (!startUpSetingsComplete)
+          {
+            if (options.Printer == PrinterType.QIDI_X_MAX_3)
+            {
+              if (options.bedLeveling && line.Trim().Contains("G29"))
+              {
+                result.Add($"M190 S{bedTarget} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
+                result.Add(line + " ; G29 included by User Preference.");
+              }
+
+              // Handle initial nozzle temperature before any extrusion (E > 0)
+              if (!nozzleTempSet)
+              {
+                if (line.Contains("G0") || line.Contains("G1"))
+                {
+                  if (fp.GetArgument(line, "E", out double evalue) && evalue > 0)
+                  {
+                    result.Add($"M140 S{bedTarget} ; start bed heating (non-blocking)");
+                    if (chamberTarget.Value > 0)
+                      result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                    result.Add($"M190 S{bedTarget} ; wait for bed");
+                    if (chamberTarget > 0)
+                      result.Add($"M191 S{chamberTarget} ; wait for chamber");
+                    if (options.ChamberHold > 0)
+                      result.Add($"G4 P{options.ChamberHold * 60 * 1000}");
+
+                    result.Add($"M104 S{nozzleTarget} ; start nozzle preheat (non-blocking)");
+                    result.Add($"M109 S{nozzleTarget} ; wait for nozzle");
+
+                    nozzleTempSet = true;
+                    startUpSetingsComplete = true;
+                  }
+                }
+              }
+              continue;
+            }
+
+            if (options.Printer == PrinterType.QIDI_Q1_Pro)
+            {
+              if (line.IndexOf("PRINT_START", StringComparison.OrdinalIgnoreCase) >= 0)
+              {
+                if (options.bedLeveling)
+                {
+                  // Build PRINT_START with only the params we have
+                  if (chamberTarget > 0)
+                    result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                  var parts = new List<string>
+                  {
+                    $"BED={bedTarget}",
+                    $"HOTEND={nozzleTarget}"
+                  };
+                  if (chamberTarget > 0) parts.Add($"CHAMBER={chamberTarget}");
+
+                  string newPrintStart = "PRINT_START " + string.Join(" ", parts);
+                  result.Add(newPrintStart + " ; modified by 3D Printer Poster");
+                }
+
+                result.Add("M104 S100 ; Set Nozzle to a low temp while the bed and chamber catchup (non-blocking).");
+                // Manual warm-up path (no PRINT_START)
+                result.Add($"M140 S{bedTarget} ; start bed heating (non-blocking)");
+                if (chamberTarget > 0)
+                  result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+
+                result.Add($"M190 S{bedTarget} ; wait for bed");
+                if (chamberTarget > 0)
+                  result.Add($"M191 S{chamberTarget} ; wait for chamber");
+
+                if (options.ChamberHold > 0)
+                {
+                  result.Add($"G4 P{options.ChamberHold * 60 * 1000}");
+                }
+
+                result.Add($"M104 S{nozzleTarget} ; start nozzle preheat (non-blocking)");
+
+                result.Add($"M109 S{nozzleTarget} ; wait for nozzle");
+
+                line = " ; " + line;
+                
+                startUpSetingsComplete = true;
+              }
+            }
+          }
+          
+          if (line.Contains("EXECUTABLE_BLOCK_END"))
+          {
+            result.Add("M140 S0 ; Shut down the bed, non-blocking");
+            result.Add("M141 S0 ; Shut down the chamber, non-blocking");
+            result.Add("M109 S0 ; Shut down the extruder, blocking");
+            result.Add("M106 S0 ; Shut off fans");
+            executionEnd = true;
+          }
+
+          result.Add(line);
+        }
+        return result;
+      }
       List<string> SetFeedRatesByLayer(List<string> inputLines, PrintSettings options)
       {
         List<string> result = new List<string>();
@@ -105,19 +234,59 @@ namespace _3dPrinterPoster
         }
         return result;
       }
-      List<string> SetNozzleTempsByLayer(List<stirng> inputLines, PrintSettings options)
+      List<string> SetNozzleTempsByLayer(List<string> inputLines, PrintSettings options)
       {
         List<string> result = new List<string>();
         int currentLayer = 0;
         bool nozzleTempSet = false;
-
+        int lastLayer = 0;
+        double lastBedTemp = 0;
+        double lastChamberTemp = 0;
+        double lastNozzleTemp = 0;
         for (int ii = 0; ii < inputLines.Count; ii++)
         {
           string line = inputLines[ii];
 
           currentLayer = CheckCurrentLayer(options, currentLayer, line);
 
+          if (currentLayer != lastLayer)
+          {
+            lastLayer = currentLayer;
 
+            int? nozzleTarget = options?.GetNozzleTempForLayer(currentLayer);
+            int? bedTarget = options?.GetBedTempForLayer(currentLayer);
+
+            // Single chamber value (optional)
+            int? chamberTarget = (options?.ChamberTempC is > 0) ? options.ChamberTempC : null;
+
+            // Emit only if present AND changed since last time
+            bool changeNozzle = nozzleTarget.HasValue && nozzleTarget != lastNozzleTemp;
+            bool changeBed = bedTarget.HasValue && bedTarget != lastBedTemp;
+            bool changeChamber = chamberTarget.HasValue && chamberTarget != lastChamberTemp;
+
+            if (changeNozzle || changeBed || changeChamber)
+            {
+              result.Add($"; apply temperature setpoints for layer {currentLayer}");
+
+              // Start all heaters in parallel (non-blocking)
+              if (changeBed) result.Add($"M140 S{bedTarget} ; bed start (non-blocking)");
+              if (changeNozzle) result.Add($"M104 S{nozzleTarget} ; nozzle start (non-blocking)");
+              if (changeChamber) result.Add($"M141 S{chamberTarget} ; chamber start (non-blocking)");
+
+              // On the first printable layer, wait before proceeding
+              if (currentLayer == 1)
+              {
+                if (changeBed) result.Add($"M190 S{bedTarget} ; wait for bed");
+                if (changeNozzle) result.Add($"M109 S{nozzleTarget} ; wait for nozzle");
+                if (changeChamber) result.Add($"M191 S{chamberTarget} ; wait for chamber");
+              }
+
+              if (changeNozzle) lastNozzleTemp = nozzleTarget.Value;
+              if (changeBed) lastBedTemp = bedTarget.Value;
+              if (changeChamber) lastChamberTemp = chamberTarget.Value;
+            }
+          }
+          result.Add(line);
         }
         return result;
       }
@@ -282,270 +451,23 @@ namespace _3dPrinterPoster
         foreach( string s in input)
         {
           bool unknownCode = false;
-          unknownCode = unknownCode || s.Contains("G17");
+
+          unknownCode = unknownCode || s == null || s.Contains("G17");
           if(!unknownCode)
             result.Add(s);
         }
         return result;
       }
 
-
-
-      List<string> output = MainOptionsModifier(lines, options);
-
-      if (output == null)
-        return;
-
+      List<string> output = InitialAndGlobalSettings(lines, options);
       output = SetFeedRatesByLayer(output, options);
+      output = SetNozzleTempsByLayer(output, options);
       output = SetSupportInterfaceTemp(output, options);
       output = SetCoolingFanLevels(output, options);
       output = InsertOperatorMessages(output, options);
       output = CleanUpKnownBadCommands(output, options);
 
       File.WriteAllLines(newPath, output);
-    }
-
-
-
-
-
-    private static List<string> MainOptionsModifier(List<string> inputLines, PrintSettings options)
-    {
-      ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
-
-      try
-      {
-        string[] lines = inputLines.ToArray();
-
-        Console.WriteLine("File loaded with " + lines.Length + " lines.");
-
-        int bedTemp = options.BedTempByLayer[0].Temp; // Get the first layer bed temperature
-        int nozzleTemp = options.NozzleTempByLayer[0].Temp; // Get the first layer nozzle temperature
-        int chamberTemp = options.ChamberTempC ?? 0; // Get chamber temp, default to 0 if not set
-
-        // Step 1: Initial cleanup
-        var cleanedLines = lines.Where(line =>
-        {
-          string trimmed = line.TrimStart();
-
-          // Remove any lines that control temps — we'll handle them later
-          if (trimmed.StartsWith("M104")) return false;
-          if (trimmed.StartsWith("M140")) return false;
-          if (trimmed.StartsWith("M109")) return false;
-          if (trimmed.StartsWith("M190")) return false;
-          if (trimmed.StartsWith("M191")) return false;
-          if (trimmed.StartsWith("M141")) return false;
-
-          // G29 is optional via checkbox
-          if (trimmed.StartsWith("G29") && !options.bedLeveling) return false;
-
-          return true;
-        }).ToList();
-
-
-        bool isFromQidiStudio = cleanedLines.Any(line => line.Contains("QIDIStudio"));
-        string layerTag = isFromQidiStudio ? ";Z_HEIGHT:" : ";Z:";
-
-        // Step 2: Apply layer-aware edits
-        var modifiedLines = new List<string>();
-        double currentZ = 0.0;
-        int currentLayer = 0;
-        double lastZ = 0;
-        bool inWipeEnd = false;
-        bool inE1command = false;
-
-        double layerHeight = options.LayerHeight;
-        bool nozzleTempSet = false;
-        int? lastNozzleTemp = null;
-        int? lastBedTemp = null;
-        int? lastChamberTemp = null;
-        bool ExecutionEnd = false;
-
-        foreach (var line in cleanedLines)
-        {
-          string modifiedLine = line;
-
-          if (ExecutionEnd)
-          {
-            modifiedLines.Add(line);
-            continue; // Skip further processing if execution has ended
-          }
-
-          if (options.Printer == PrinterType.QIDI_X_MAX_3 && options.bedLeveling && line.Trim().Contains("G29"))
-          {
-            modifiedLines.Add($"M190 S{bedTemp} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
-            modifiedLines.Add(line + " ; G29 included by User Preference.");
-            continue;
-          }
-
-          // Handle initial nozzle temperature before any extrusion (E > 0)
-          if (!nozzleTempSet && options.Printer != PrinterType.QIDI_Q1_Pro)
-          {
-            if (line.Contains("G0") || line.Contains("G1"))
-            {
-              if (fp.GetArgument(line, "E", out double evalue) && evalue > 0)
-              {
-                modifiedLines.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
-                if (chamberTemp > 0)
-                  modifiedLines.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
-                modifiedLines.Add($"M190 S{bedTemp} ; wait for bed");
-                if (chamberTemp > 0)
-                  modifiedLines.Add($"M191 S{chamberTemp} ; wait for chamber");
-                if (options.ChamberHold > 0)
-                  modifiedLines.Add($"G4 P{options.ChamberHold * 60 * 1000}");
-
-                modifiedLines.Add($"M104 S{nozzleTemp} ; start nozzle preheat (non-blocking)");
-                modifiedLines.Add($"M109 S{nozzleTemp} ; wait for nozzle");
-
-                nozzleTempSet = true;
-              }
-            }
-          }
-
-
-          if (options.Printer == PrinterType.QIDI_Q1_Pro && line.IndexOf("PRINT_START", StringComparison.OrdinalIgnoreCase) >= 0)
-          {
-
-            if (options.bedLeveling)
-            {
-              // Build PRINT_START with only the params we have
-              if (chamberTemp > 0)
-                modifiedLines.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
-              var parts = new List<string>
-                  {
-                    $"BED={bedTemp}",
-                    $"HOTEND={nozzleTemp}"
-                  };
-              if (chamberTemp > 0) parts.Add($"CHAMBER={chamberTemp}");
-
-              string newPrintStart = "PRINT_START " + string.Join(" ", parts);
-              modifiedLines.Add(newPrintStart + " ; modified by 3D Printer Poster");
-            }
-
-            modifiedLines.Add("M104 S100 ; Set Nozzle to a low temp while the bed and chamber catchup (non-blocking).");
-            // Manual warm-up path (no PRINT_START)
-            modifiedLines.Add($"M140 S{bedTemp} ; start bed heating (non-blocking)");
-            if (chamberTemp > 0)
-              modifiedLines.Add($"M141 S{chamberTemp} ; start chamber heating (non-blocking)");
-
-            modifiedLines.Add($"M190 S{bedTemp} ; wait for bed");
-            if (chamberTemp > 0)
-              modifiedLines.Add($"M191 S{chamberTemp} ; wait for chamber");
-
-            if (options.ChamberHold > 0)
-            {
-              modifiedLines.Add($"G4 P{options.ChamberHold * 60 * 1000}");
-            }
-
-            modifiedLines.Add($"M104 S{nozzleTemp} ; start nozzle preheat (non-blocking)");
-
-            modifiedLines.Add($"M109 S{nozzleTemp} ; wait for nozzle");
-
-
-            modifiedLines.Add("; " + line); // keep original as comment for traceability
-            
-            continue;
-          }
-
-
-          // handle temps for layer changes
-          string lineTrimmed = Regex.Replace(line, @"\s+", "");
-          if (lineTrimmed.StartsWith(layerTag))
-          {
-            lineTrimmed = isFromQidiStudio ? lineTrimmed.Replace("Z_HEIGHT:", "Z:") : lineTrimmed;
-            string ZArgument = "Z:";
-            currentZ = fp.GetArgument2(lineTrimmed, ZArgument);
-
-            currentLayer = (int)Math.Round(currentZ / layerHeight);
-            if (currentLayer < 1) currentLayer = 1;
-
-            modifiedLines.Add(modifiedLine + $" ; layer {currentLayer}");
-
-            int? nozzleTarget = options?.GetNozzleTempForLayer(currentLayer);
-            int? bedTarget = options?.GetBedTempForLayer(currentLayer);
-
-            // Single chamber value (optional)
-            int? chamberTarget = (options?.ChamberTempC is > 0) ? options.ChamberTempC : null;
-
-            // Emit only if present AND changed since last time
-            bool changeNozzle = nozzleTarget.HasValue && nozzleTarget != lastNozzleTemp;
-            bool changeBed = bedTarget.HasValue && bedTarget != lastBedTemp;
-            bool changeChamber = chamberTarget.HasValue && chamberTarget != lastChamberTemp;
-
-            if (changeNozzle || changeBed || changeChamber)
-            {
-              modifiedLines.Add($"; apply temperature setpoints for layer {currentLayer}");
-
-              // Start all heaters in parallel (non-blocking)
-              if (changeBed) modifiedLines.Add($"M140 S{bedTarget} ; bed start (non-blocking)");
-              if (changeNozzle) modifiedLines.Add($"M104 S{nozzleTarget} ; nozzle start (non-blocking)");
-              if (changeChamber) modifiedLines.Add($"M141 S{chamberTarget} ; chamber start (non-blocking)");
-
-              // On the first printable layer, wait before proceeding
-              if (currentLayer == 1)
-              {
-                if (changeBed) modifiedLines.Add($"M190 S{bedTarget} ; wait for bed");
-                if (changeNozzle) modifiedLines.Add($"M109 S{nozzleTarget} ; wait for nozzle");
-                if (changeChamber) modifiedLines.Add($"M191 S{chamberTarget} ; wait for chamber");
-              }
-
-              if (changeNozzle) lastNozzleTemp = nozzleTarget;
-              if (changeBed) lastBedTemp = bedTarget;
-              if (changeChamber) lastChamberTemp = chamberTarget;
-            }
-
-            continue;
-          }
-
-
-
-
-
-
-          if (currentLayer > 0)
-          {
-            inWipeEnd = line.Contains("WIPE_END") || inWipeEnd;
-
-            int gcmd = (int)fp.GetArgument2(line, "G");
-            if (gcmd == 0 || gcmd == 1)
-            {
-              if (line.Contains("Z"))
-              {
-                double zcmd = fp.GetArgument2(line, "Z");
-                if (zcmd - lastZ > .2 && inWipeEnd)
-                {
-                  modifiedLines.Add(modifiedLine + " ; Z hop detected");
-                  //Console.WriteLine("Z hop detected");
-                  inWipeEnd = false; // reset after handling Z hop
-                  continue;
-                }
-                lastZ = zcmd;
-              }
-            }
-          }
-
-          if (line.Contains("EXECUTABLE_BLOCK_END"))
-          {
-            modifiedLines.Add("M140 S0 ; Shut down the bed, non-blocking");
-            modifiedLines.Add("M141 S0 ; Shut down the chamber, non-blocking");
-            modifiedLines.Add("M109 S0 ; Shut down the extruder, blocking");
-            modifiedLines.Add("M106 S0 ; Shut off fans");
-            ExecutionEnd = true;
-          }
-
-          // Default: add line unchanged
-          modifiedLines.Add(line);
-        }
-
-        return modifiedLines;
-
-
-      }
-      catch (Exception ex)
-      {
-        MessageBox.Show("Error reading file: " + ex.Message);
-        return null;
-      }
     }
 
     private static string Ordinal(int n)
