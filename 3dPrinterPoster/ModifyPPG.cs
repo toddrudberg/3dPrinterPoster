@@ -109,7 +109,14 @@ namespace _3dPrinterPoster
                       result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
                     result.Add($"M190 S{bedTarget} ; wait for bed");
                     if (chamberTarget > 0)
-                      result.Add($"M191 S{chamberTarget} ; wait for chamber");
+                    {
+                      if( chamberTarget > 40)
+                        result.Add($"M191 S{40} ; wait for chamber");
+                      else
+                        result.Add($"M191 S{chamberTarget} ; wait for chamber");
+
+                      result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                    }
                     if (options.ChamberHold > 0)
                       result.Add($"G4 P{options.ChamberHold * 60 * 1000}");
 
@@ -148,11 +155,18 @@ namespace _3dPrinterPoster
                 // Manual warm-up path (no PRINT_START)
                 result.Add($"M140 S{bedTarget} ; start bed heating (non-blocking)");
                 if (chamberTarget > 0)
+                {
+                  if (chamberTarget > 40)
+                    result.Add($"M191 S{40} ; wait for chamber");
+                  else
+                    result.Add($"M191 S{chamberTarget} ; wait for chamber");
+
                   result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                }
 
                 result.Add($"M190 S{bedTarget} ; wait for bed");
-                if (chamberTarget > 0)
-                  result.Add($"M191 S{chamberTarget} ; wait for chamber");
+                //if (chamberTarget > 0)
+                //  result.Add($"M191 S{chamberTarget} ; wait for chamber");
 
                 if (options.ChamberHold > 0)
                 {
@@ -477,13 +491,19 @@ namespace _3dPrinterPoster
       List<string> CleanUpKnownBadCommands(List<string> input, PrintSettings options)
       {
         List<string> result = new List<string>();
+        int i = 1;
         foreach( string s in input)
         {
           bool unknownCode = false;
+          if (s == null)
+            Console.WriteLine($"badline @ {i}");
 
-          unknownCode = unknownCode || s == null || s.Contains("G17");
+          unknownCode = unknownCode || s == null;
+          unknownCode = unknownCode || s.Contains("G17");
           if(!unknownCode)
             result.Add(s);
+
+          i++;
         }
         return result;
       }
