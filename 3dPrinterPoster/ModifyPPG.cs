@@ -32,9 +32,9 @@ namespace _3dPrinterPoster
         return sb.ToString();
       }
 
-      int CheckCurrentLayer(PrintSettings options, int currentLayer, string line)
+      int CheckCurrentLayer(PrintSettings options, string line)
       {
-
+        int currentLayer = 0;
         string layerTag = isFromQidiStudio ? ";Z_HEIGHT:" : ";Z:";
         ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
         string lineNoWS = ClearWhiteSpace(line);
@@ -193,7 +193,7 @@ namespace _3dPrinterPoster
         {
           string line = inputLines[ii];
 
-          currentLayer = CheckCurrentLayer(options, currentLayer, line);
+          currentLayer = CheckCurrentLayer(options, line);
           
           //Override Feedrates
           if (line.StartsWith("G1"))
@@ -247,7 +247,7 @@ namespace _3dPrinterPoster
         {
           string line = inputLines[ii];
 
-          currentLayer = CheckCurrentLayer(options, currentLayer, line);
+          currentLayer = CheckCurrentLayer(options, line);
 
           if (currentLayer != lastLayer)
           {
@@ -410,19 +410,15 @@ namespace _3dPrinterPoster
           int zIndex = line.IndexOf("Z_HEIGHT:");
           int layerIndex = line.IndexOf("layer");
 
-          if (zIndex == -1 || layerIndex == -1)
+          if (zIndex == -1 )
             return null;
+          int currentLayer = CheckCurrentLayer(options, line);
 
           // Extract Z height
           int zStart = zIndex + "Z_HEIGHT:".Length;
-          int zEnd = line.IndexOf(";", zStart);
+          int zEnd = line.Length;
           string zHeight = line.Substring(zStart, zEnd - zStart).Trim();
-
-          // Extract layer number
-          int layerStart = layerIndex + "layer".Length;
-          string layerNumber = line.Substring(layerStart).Trim();
-
-          return $"M118 Layer {layerNumber}  T={zHeight}mm";
+          return $"M118 Layer {currentLayer}  T={zHeight}mm";
         }
 
         List<string> result = new List<string>();
