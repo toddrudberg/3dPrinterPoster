@@ -139,13 +139,30 @@ namespace _3dPrinterPoster
                 {
                   // Build PRINT_START with only the params we have
                   if (chamberTarget > 0)
-                    result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                  {
+                    if (chamberTarget > bedTarget || chamberTarget > 40)
+                    {
+                      int? target = bedTarget < 40 ? bedTarget - 5 : 40;
+                      result.Add($"M141 S{target} ; start chamber heating (non-blocking)");
+                    }
+                    else
+                      result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                  }
                   var parts = new List<string>
                   {
                     $"BED={bedTarget}",
                     $"HOTEND={nozzleTarget}"
                   };
-                  if (chamberTarget > 0) parts.Add($"CHAMBER={chamberTarget}");
+                  if (chamberTarget > 0)
+                  {
+                    if (chamberTarget > bedTarget || chamberTarget > 40)
+                    {
+                      int? target = bedTarget < 40 ? bedTarget - 5 : 40;
+                      parts.Add($"CHAMBER={target}");
+                    }
+                    else
+                      parts.Add($"CHAMBER={chamberTarget}");
+                  }
 
                   string newPrintStart = "PRINT_START " + string.Join(" ", parts);
                   result.Add(newPrintStart + " ; modified by 3D Printer Poster");
@@ -156,12 +173,16 @@ namespace _3dPrinterPoster
                 result.Add($"M140 S{bedTarget} ; start bed heating (non-blocking)");
                 if (chamberTarget > 0)
                 {
-                  if (chamberTarget > 40)
-                    result.Add($"M191 S{40} ; wait for chamber");
+                  if (chamberTarget > bedTarget || chamberTarget > 40)
+                  {
+                    int? target = bedTarget < 40 ? bedTarget - 5 : 40;
+
+                    result.Add($"M191 S{target} ; wait for chamber");
+                  }
                   else
                     result.Add($"M191 S{chamberTarget} ; wait for chamber");
 
-                  result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
+                  //result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
                 }
 
                 result.Add($"M190 S{bedTarget} ; wait for bed");
@@ -237,7 +258,7 @@ namespace _3dPrinterPoster
                   string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
 
                   line +=
-                    $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s) at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
+                    $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s)";// at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
 
                   result.Add(line);
                   continue;
@@ -288,13 +309,13 @@ namespace _3dPrinterPoster
               if (changeNozzle) result.Add($"M104 S{nozzleTarget} ; nozzle start (non-blocking)");
               if (changeChamber) result.Add($"M141 S{chamberTarget} ; chamber start (non-blocking)");
 
-              // On the first printable layer, wait before proceeding
-              if (currentLayer == 1)
-              {
-                if (changeBed) result.Add($"M190 S{bedTarget} ; wait for bed");
-                if (changeNozzle) result.Add($"M109 S{nozzleTarget} ; wait for nozzle");
-                if (changeChamber) result.Add($"M191 S{chamberTarget} ; wait for chamber");
-              }
+              // On the first printable layer, wait before proceeding You've done this above!
+              //if (currentLayer == 1)
+              //{
+              //  if (changeBed) result.Add($"M190 S{bedTarget} ; wait for bed");
+              //  if (changeNozzle) result.Add($"M140 S{nozzleTarget} ; wait for nozzle");
+              //  if (changeChamber) result.Add($"M141 S{chamberTarget} ; set chamber and go");
+              //}
 
               if (changeNozzle) lastNozzleTemp = nozzleTarget.Value;
               if (changeBed) lastBedTemp = bedTarget.Value;
@@ -362,8 +383,12 @@ namespace _3dPrinterPoster
       {
         List<string> result = new List<string>();
         ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+        int currentLayer = 1;
         foreach (string line in input)
         {
+          if (line.Contains("Z_HEIGHT:"))
+            currentLayer = CheckCurrentLayer(options, line);
+          int currentSpeed = options.EnablePartCoolingFan ? options.GetFanSpeedForLayer(currentLayer) : 0;
           string thisline = line;
           if (line.Contains("M106"))
           {
@@ -377,7 +402,10 @@ namespace _3dPrinterPoster
                   {
                     if (options.EnablePartCoolingFan)
                     {
-                      thisline = line; // do nothing
+                      fp.ReplaceArgument(line, "S", $"{currentSpeed * 255 / 100:F0}", out string newline);
+                      var rule = options.GetFanSpeedRuleForLayer(currentLayer);
+                      int ruleLayer = rule?.Layer ?? -1;
+                      thisline = newline + $" ; fan speed {currentSpeed:F0}% for {ruleLayer}+"; // do nothing
                     }
                     else
                     {
@@ -405,7 +433,10 @@ namespace _3dPrinterPoster
               {
                 if (options.EnablePartCoolingFan)
                 {
-                  thisline = line;
+                  fp.ReplaceArgument(line, "S", $"{currentSpeed * 255 / 100:F0}", out string newline);
+                  var rule = options.GetFanSpeedRuleForLayer(currentLayer);
+                  int ruleLayer = rule?.Layer ?? -1;
+                  thisline = newline + $" ; fan speed {currentSpeed:F0}% for {ruleLayer}+"; // do nothing
                 }
                 else
                 {
@@ -437,27 +468,18 @@ namespace _3dPrinterPoster
           int zEnd = line.Length;
           string zHeight = line.Substring(zStart, zEnd - zStart).Trim();
 
-          messages.Add($"M118 Layer {currentLayer} T={zHeight}mm");
+          //messages.Add($"M118 Layer {currentLayer} T={zHeight}mm");
           var rule = options.GetSpeedRuleForLayer(currentLayer);
           int ruleLayer = rule?.Layer ?? -1;
 
           string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
 
-          messages.Add($"M118 SPEED {rule:F1} at {where}");
+          //messages.Add($"M118 SPEED {rule:F1} at {where}");
 
           int? nozzleTarget = options?.GetNozzleTempForLayer(currentLayer);
           int? bedTarget = options?.GetBedTempForLayer(currentLayer);
 
-          if (nozzleTarget is int nt)
-          {
-            messages.Add($"M118 NOZZLE {nt}C at {where}");
-          }
-
-          if (bedTarget is int bt)
-          {
-            messages.Add($"M118 BED {bt}C at {where}");
-          }
-
+          messages.Add($"M118 L{currentLayer} Z{zHeight} F{rule:F0} N{nozzleTarget ?? 0} B{bedTarget ?? 0}");
           return messages;
         }
 
@@ -500,6 +522,7 @@ namespace _3dPrinterPoster
 
           unknownCode = unknownCode || s == null;
           unknownCode = unknownCode || s.Contains("G17");
+          unknownCode = unknownCode || s.Contains("M73");
           if(!unknownCode)
             result.Add(s);
 
