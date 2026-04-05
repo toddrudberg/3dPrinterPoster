@@ -87,6 +87,7 @@ namespace _3dPrinterPoster
         for(int i = 0; i < cleanedLines.Count; i++) 
         {
           string line = cleanedLines[i];
+          string addThisLine = line;
           if (!startUpSetingsComplete)
           {
             if (options.Printer == PrinterType.QIDI_X_MAX_3)
@@ -95,6 +96,7 @@ namespace _3dPrinterPoster
               {
                 result.Add($"M190 S{bedTarget} ; Wait for bed temp before G29 - inserted by 3D Printer Poster");
                 result.Add(line + " ; G29 included by User Preference.");
+                addThisLine = "";
               }
 
               // Handle initial nozzle temperature before any extrusion (E > 0)
@@ -105,7 +107,7 @@ namespace _3dPrinterPoster
                   if (fp.GetArgument(line, "E", out double evalue) && evalue > 0)
                   {
                     result.Add($"M140 S{bedTarget} ; start bed heating (non-blocking)");
-                    if (chamberTarget.Value > 0)
+                    if (chamberTarget != null && chamberTarget.Value > 0)
                       result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
                     result.Add($"M190 S{bedTarget} ; wait for bed");
                     if (chamberTarget > 0)
@@ -128,6 +130,7 @@ namespace _3dPrinterPoster
                   }
                 }
               }
+              result.Add(addThisLine);
               continue;
             }
 
@@ -451,40 +454,101 @@ namespace _3dPrinterPoster
       }
       List<string> InsertOperatorMessages(List<string> input, PrintSettings options)
       {
-        List<string> CreateOperatorMessages(string line)
+        var result = new List<string>();
+
+        string SanitizeConsoleMarker(string msg)
         {
-          List<string> messages = new List<string>();
+          if (string.IsNullOrWhiteSpace(msg))
+            return "MSG_EMPTY";
 
-          int zIndex = line.IndexOf("Z_HEIGHT:");
-          int layerIndex = line.IndexOf("layer");
+          var sb = new System.Text.StringBuilder();
 
-          if (zIndex == -1)
-            return messages;
+          foreach (char c in msg.ToUpperInvariant())
+          {
+            if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+              sb.Append(c);
+            else if (c == '.')
+              sb.Append('P');
+            else if (c == ' ' || c == '-' || c == ':' || c == '=' || c == '/' || c == '\\')
+              sb.Append('_');
+          }
 
-          int currentLayer = CheckCurrentLayer(options, line);
+          string s = sb.ToString().Trim('_');
 
-          // Extract Z height
-          int zStart = zIndex + "Z_HEIGHT:".Length;
-          int zEnd = line.Length;
-          string zHeight = line.Substring(zStart, zEnd - zStart).Trim();
+          while (s.Contains("__"))
+            s = s.Replace("__", "_");
 
-          //messages.Add($"M118 Layer {currentLayer} T={zHeight}mm");
-          var rule = options.GetSpeedRuleForLayer(currentLayer);
-          int ruleLayer = rule?.Layer ?? -1;
-
-          string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
-
-          //messages.Add($"M118 SPEED {rule:F1} at {where}");
-
-          int? nozzleTarget = options?.GetNozzleTempForLayer(currentLayer);
-          int? bedTarget = options?.GetBedTempForLayer(currentLayer);
-
-          messages.Add($"M118 L{currentLayer} Z{zHeight} F{rule:F0} N{nozzleTarget ?? 0} B{bedTarget ?? 0}");
-          return messages;
+          return string.IsNullOrWhiteSpace(s) ? "MSG_EMPTY" : s;
         }
 
-        List<string> result = new List<string>();
-        ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
+        List<string> EmitMessage(string msg)
+        {
+          var lines = new List<string>();
+
+          if (string.IsNullOrWhiteSpace(msg))
+            return lines;
+
+          string clean = SanitizeConsoleMarker(msg);
+
+          switch (options.Printer)
+          {
+            case PrinterType.QIDI_Q1_Pro:
+              lines.Add($"M118 {clean}");
+              break;
+
+            case PrinterType.QIDI_X_MAX_3:
+              lines.Add($"MSG_{clean}");   // <-- intentional invalid command
+              break;
+
+            default:
+              lines.Add($"M118 {clean}");
+              break;
+          }
+
+          return lines;
+        }
+
+        List<string> CreateOperatorMessages(string line)
+        {
+          int currentLayer = CheckCurrentLayer(options, line);
+          var messages = new List<string>();
+
+          int zIndex = line.IndexOf("Z_HEIGHT", StringComparison.OrdinalIgnoreCase);
+          if (zIndex < 0)
+            return messages;
+
+          // crude parse of formats like:
+          // ; Z_HEIGHT: 0.20
+          // ;Z_HEIGHT: 0.20
+          string after = line.Substring(zIndex);
+          int colon = after.IndexOf(':');
+          if (colon < 0)
+            return messages;
+
+          string valuePart = after.Substring(colon + 1).Trim();
+
+          // stop at first whitespace/comment separator after number
+          int end = 0;
+          while (end < valuePart.Length &&
+                 ("0123456789.-".IndexOf(valuePart[end]) >= 0))
+          {
+            end++;
+          }
+
+          string numberText = end > 0 ? valuePart.Substring(0, end) : "";
+
+          if (double.TryParse(numberText, System.Globalization.NumberStyles.Float,
+              System.Globalization.CultureInfo.InvariantCulture, out double z))
+          {
+            messages.AddRange(EmitMessage($"Layer: {currentLayer} Z {z:F2}"));
+          }
+          else
+          {
+            messages.AddRange(EmitMessage("Layer change"));
+          }
+
+          return messages;
+        }
 
         foreach (string line in input)
         {
@@ -494,15 +558,96 @@ namespace _3dPrinterPoster
             continue;
           }
 
-          if (line.StartsWith("G4 P"))
+          // ---- PAUSE ----
+          if (line.StartsWith("G4 P", StringComparison.OrdinalIgnoreCase))
           {
             fp.GetArgument(line, "P", out double pcode, false);
-            result.Add($"M118 Pausing for {pcode / 1000 / 60:F1} minutes");
+            double totalSeconds = pcode;
+
+            int minutes = (int)(totalSeconds / 1000 / 60);
+            double seconds = totalSeconds / 1000 - minutes * 60;
+
+            result.AddRange(EmitMessage($"Pausing for {minutes}m {seconds:F1}s"));
+          }
+          else if (line.StartsWith("G4 S", StringComparison.OrdinalIgnoreCase))
+          {
+            fp.GetArgument(line, "S", out double scode, false);
+            double totalSeconds = scode;
+
+            int minutes = (int)(totalSeconds / 60);
+            double seconds = totalSeconds - minutes * 60;
+
+            result.AddRange(EmitMessage($"Pausing for {minutes}m {seconds:F1}s"));
+          }
+          else if (line.StartsWith("G4", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Pausing"));
           }
 
-          if (line.Contains("Z_HEIGHT"))
+          // ---- LAYER INFO ----
+          if (line.Contains("Z_HEIGHT", StringComparison.OrdinalIgnoreCase))
           {
             result.AddRange(CreateOperatorMessages(line));
+          }
+
+          // ---- GENERAL OPS ----
+          if (line.StartsWith("PRINT_START", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Print Start"));
+          }
+
+          if (line.StartsWith("G28", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Homing"));
+          }
+
+          if (line.StartsWith("G29", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Mesh Leveling"));
+          }
+
+          // ---- TEMPERATURE WAITS (REAL BLOCKING) ----
+          if (line.StartsWith("M190", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Waiting for Bed"));
+          }
+
+          if (line.StartsWith("M109", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Waiting for Nozzle"));
+          }
+
+          if (line.StartsWith("M191", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Waiting for Chamber"));
+          }
+
+          // ---- MOTION WAIT ----
+          if (line.StartsWith("M400", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Waiting for Motion"));
+          }
+
+          // ---- KLIPPER STYLE ----
+          if (line.StartsWith("TEMPERATURE_WAIT", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Waiting for Temperature"));
+          }
+
+          // ---- NON-WAIT (BUT USEFUL INFO) ----
+          if (line.StartsWith("M104", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Set Nozzle Temp"));
+          }
+
+          if (line.StartsWith("M140", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Set Bed Temp"));
+          }
+
+          if (line.StartsWith("M141", StringComparison.OrdinalIgnoreCase))
+          {
+            result.AddRange(EmitMessage("Set Chamber Temp"));
           }
 
           result.Add(line);
