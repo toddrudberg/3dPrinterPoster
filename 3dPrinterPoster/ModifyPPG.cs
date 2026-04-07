@@ -169,7 +169,17 @@ namespace _3dPrinterPoster
 
                   string newPrintStart = "PRINT_START " + string.Join(" ", parts);
                   result.Add(newPrintStart + " ; modified by 3D Printer Poster");
+
+
                 }
+                else
+                {
+                  result.Add("BED_MESH_PROFILE LOAD=default");
+                }
+
+                if (options.zOffset != 0)
+                  MessageBox.Show($"WARNING: Zoffset is {options.zOffset}");
+                result.Add($"SET_GCODE_OFFSET Z={options.zOffset} MOVE=1");
 
                 result.Add("M104 S100 ; Set Nozzle to a low temp while the bed and chamber catchup (non-blocking).");
                 // Manual warm-up path (no PRINT_START)
@@ -261,7 +271,7 @@ namespace _3dPrinterPoster
                   string where = ruleLayer > 0 ? $"(rule L{ruleLayer}+)" : "(default rule)";
 
                   line +=
-                    $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s)";// at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
+                    $" ; feedrate capped to {currentSpeed * 60} mm/min ({currentSpeed} mm/s) at layer {currentLayer} ({Ordinal(currentLayer)}) {where} - modified by 3D Printer Poster";
 
                   result.Add(line);
                   continue;
@@ -675,6 +685,51 @@ namespace _3dPrinterPoster
         }
         return result;
       }
+      List<string> ApplyZOffset(List<string> input, PrintSettings options)
+      {
+        if (options.zOffset == 0d)
+        {
+          return input;
+        }
+        else
+        {
+          List<string> result = new List<string>();
+          bool printStart = false;
+          foreach (string line in input)
+          {
+            if( !printStart )
+            {
+              result.Add(line);
+              if(line.Contains("PRINT_START"))
+              {
+                printStart = true;
+              }
+              continue;
+            }
+            if (line.Contains("G1") || line.Contains("G0") || line.Contains("G9") || line.Contains("G2") || line.Contains("G3"))
+            {
+              string newLine = line;
+              if (line.Contains("Z"))
+              {
+                double z = fp.GetArgument2(line, "Z");
+                z += options.zOffset;
+                bool e = fp.ReplaceArgument(line, "Z", z, out newLine, "F3");
+                if (!e)
+                {
+                  MessageBox.Show("error: zarg not replaced in ApplyZoffset.");
+                }
+              }
+              result.Add(newLine);
+            }
+            else
+            {
+              result.Add(line);
+            }
+          }
+
+          return result;
+        }
+      }
 
       List<string> output = InitialAndGlobalSettings(lines, options);
       output = SetFeedRatesByLayer(output, options);
@@ -682,6 +737,7 @@ namespace _3dPrinterPoster
       output = SetSupportInterfaceTemp(output, options);
       output = SetCoolingFanLevels(output, options);
       output = InsertOperatorMessages(output, options);
+      //output = ApplyZOffset(output, options);
       output = CleanUpKnownBadCommands(output, options);
 
       File.WriteAllLines(newPath, output);

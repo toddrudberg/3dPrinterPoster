@@ -12,12 +12,17 @@ namespace _3dPrinterPoster
   public class PrintSettings
   {
 
-    [Category("Bed Leveling")]
+    [Category("Bed Setup")]
     [DisplayName("Autolevel Bed?")]
     [Description("Autobed leveling is time consuming and if your bed is level, skip it.")]
     [DefaultValue(false)]
     public bool bedLeveling { get; set; } = false;
 
+    [Category("Bed Setup")]
+    [DisplayName("Z offset")]
+    [Description("Garolite is 2.63mm thicker")]
+    [DefaultValue(0.0)]
+    public double zOffset { get; set; } = 0d;
 
     [Category("Identification")]
     [DisplayName("Profile Name")]
