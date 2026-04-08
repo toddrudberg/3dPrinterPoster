@@ -685,51 +685,50 @@ namespace _3dPrinterPoster
         }
         return result;
       }
-      List<string> ApplyZOffset(List<string> input, PrintSettings options)
+      List<string> MakeDatumFile(List<string> input, PrintSettings settings)
       {
-        if (options.zOffset == 0d)
+        List<string> result = new List<string>();
+        var bedTarget = options.GetBedTempForLayer(1);
+        var nozzleTarget = options.GetNozzleTempForLayer(1);
+        var chamberTarget = options.ChamberTempC;
+        foreach (string s in input) 
         {
-          return input;
-        }
-        else
-        {
-          List<string> result = new List<string>();
-          bool printStart = false;
-          foreach (string line in input)
+          
+          if (s.Contains("PRINT_START"))
           {
-            if( !printStart )
-            {
-              result.Add(line);
-              if(line.Contains("PRINT_START"))
-              {
-                printStart = true;
-              }
-              continue;
-            }
-            if (line.Contains("G1") || line.Contains("G0") || line.Contains("G9") || line.Contains("G2") || line.Contains("G3"))
-            {
-              string newLine = line;
-              if (line.Contains("Z"))
-              {
-                double z = fp.GetArgument2(line, "Z");
-                z += options.zOffset;
-                bool e = fp.ReplaceArgument(line, "Z", z, out newLine, "F3");
-                if (!e)
-                {
-                  MessageBox.Show("error: zarg not replaced in ApplyZoffset.");
-                }
-              }
-              result.Add(newLine);
-            }
-            else
-            {
-              result.Add(line);
-            }
-          }
+            result.Add("M118 PERFORMING DATUM ON PEI PLATE");
+            result.Add("SET_GCODE_OFFSET Z=0");
+            result.Add("M118 PRINT START FUNCTION");
 
-          return result;
+            var parts = new List<string>
+                  {
+                    $"BED={bedTarget}",
+                    $"HOTEND={nozzleTarget}"
+                  };
+            if (chamberTarget > 0)
+            {
+              if (chamberTarget > bedTarget || chamberTarget > 40)
+              {
+                int? target = bedTarget < 40 ? bedTarget - 5 : 40;
+                parts.Add($"CHAMBER={target}");
+              }
+              else
+                parts.Add($"CHAMBER={chamberTarget}");
+            }
+
+            string newPrintStart = "PRINT_START " + string.Join(" ", parts);
+            result.Add(newPrintStart + " ; modified by 3D Printer Poster");
+
+            break;
+          }
+          result.Add((string)s);
         }
+        result.Add($"M140 S{bedTarget} ; Leave the bed on");
+        result.Add("M104 S0 ; shut nozzle down");
+        result.Add("G1 X150 Y150 Z150 F6000");
+        return result;
       }
+
 
       List<string> output = InitialAndGlobalSettings(lines, options);
       output = SetFeedRatesByLayer(output, options);
@@ -737,10 +736,14 @@ namespace _3dPrinterPoster
       output = SetSupportInterfaceTemp(output, options);
       output = SetCoolingFanLevels(output, options);
       output = InsertOperatorMessages(output, options);
-      //output = ApplyZOffset(output, options);
       output = CleanUpKnownBadCommands(output, options);
-
+      
       File.WriteAllLines(newPath, output);
+
+      //datum file for non-PRINT_START projects
+      List<string> datumFile = MakeDatumFile(lines, options);
+      File.WriteAllLines(newPath.Replace("_mod", "_DTM"), datumFile);
+
     }
 
     private static string Ordinal(int n)
