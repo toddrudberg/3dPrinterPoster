@@ -183,7 +183,7 @@ namespace _3dPrinterPoster
 
                 result.Add("M104 S100 ; Set Nozzle to a low temp while the bed and chamber catchup (non-blocking).");
                 // Manual warm-up path (no PRINT_START)
-                result.Add($"M140 S{bedTarget} ; start bed heating (non-blocking)");
+                result.Add($"M140 S{(bedTarget > 60 ? 60 : bedTarget)} ; start bed heating (non-blocking)");
                 if (chamberTarget > 0)
                 {
                   if (chamberTarget > bedTarget || chamberTarget > 40)
@@ -197,7 +197,11 @@ namespace _3dPrinterPoster
 
                   //result.Add($"M141 S{chamberTarget} ; start chamber heating (non-blocking)");
                 }
-
+                if(bedTarget > 60 )
+                {
+                  result.Add($"M190 S{60} ; for temps above 60C, we do it in two steps");
+                  result.Add("G4 P60000");
+                }
                 result.Add($"M190 S{bedTarget} ; wait for bed");
                 //if (chamberTarget > 0)
                 //  result.Add($"M191 S{chamberTarget} ; wait for chamber");
@@ -619,7 +623,8 @@ namespace _3dPrinterPoster
           // ---- TEMPERATURE WAITS (REAL BLOCKING) ----
           if (line.StartsWith("M190", StringComparison.OrdinalIgnoreCase))
           {
-            result.AddRange(EmitMessage("Waiting for Bed"));
+            double sword = fp.GetArgument2(line, "S");
+            result.AddRange(EmitMessage($"Waiting for Bed {sword:F0}"));
           }
 
           if (line.StartsWith("M109", StringComparison.OrdinalIgnoreCase))
@@ -652,7 +657,8 @@ namespace _3dPrinterPoster
 
           if (line.StartsWith("M140", StringComparison.OrdinalIgnoreCase))
           {
-            result.AddRange(EmitMessage("Set Bed Temp"));
+            double sword = fp.GetArgument2(line, "S");
+            result.AddRange(EmitMessage($"Set Bed Temp {sword:F0}"));
           }
 
           if (line.StartsWith("M141", StringComparison.OrdinalIgnoreCase))
