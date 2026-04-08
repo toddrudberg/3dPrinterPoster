@@ -12,12 +12,17 @@ namespace _3dPrinterPoster
   public class PrintSettings
   {
 
-    [Category("Bed Leveling")]
+    [Category("Bed Setup")]
     [DisplayName("Autolevel Bed?")]
     [Description("Autobed leveling is time consuming and if your bed is level, skip it.")]
     [DefaultValue(false)]
     public bool bedLeveling { get; set; } = false;
 
+    [Category("Bed Setup")]
+    [DisplayName("Z offset")]
+    [Description("Garolite is 2.63mm thicker")]
+    [DefaultValue(0.0)]
+    public double zOffset { get; set; } = 0d;
 
     [Category("Identification")]
     [DisplayName("Profile Name")]
@@ -81,6 +86,12 @@ namespace _3dPrinterPoster
     [Description("Set it low for Nylons.")]
     [DefaultValue(100)]
     public int ChamberFanPercent { get; set; } = 100;
+
+    [Category("Fans")]
+    [DisplayName("Part Fan % by Layer")]
+    [Editor(typeof(CollectionEditor), typeof(UITypeEditor))]
+    [Description("Part Fan-indexed % targets.")]
+    public List<LayerFanSpeedSetting> PartFanPercentByLayer { get; set; } = new();
 
 
     // --- Add these settings (optional but recommended) ---
@@ -224,6 +235,19 @@ namespace _3dPrinterPoster
       return match?.Speed ?? SpeedByLayer.OrderBy(s => s.Layer).First().Speed;
     }
 
+    public int GetFanSpeedForLayer(int layer)
+    {
+      if (PartFanPercentByLayer == null || PartFanPercentByLayer.Count == 0)
+        throw new InvalidOperationException("No speed settings defined.");
+
+      var match = PartFanPercentByLayer
+          .Where(s => s.Layer <= layer)
+          .OrderBy(s => s.Layer)
+          .LastOrDefault();
+
+      return match?.Speed ?? PartFanPercentByLayer.OrderBy(s => s.Layer).First().Speed;
+    }
+
     public int? GetNozzleTempForLayer(int layerNumber)
     {
       if (NozzleTempByLayer == null || NozzleTempByLayer.Count == 0) return null;
@@ -253,7 +277,15 @@ namespace _3dPrinterPoster
           .OrderBy(s => s.Layer)
           .LastOrDefault();
     }
+    public LayerFanSpeedSetting? GetFanSpeedRuleForLayer(int layerNumber)
+    {
+      if (PartFanPercentByLayer == null || PartFanPercentByLayer.Count == 0) return null;
 
+      return PartFanPercentByLayer
+          .Where(s => s.Layer <= layerNumber)
+          .OrderBy(s => s.Layer)
+          .LastOrDefault();
+    }
     public static PrintSettings Load(string path)
     {
       if (string.IsNullOrWhiteSpace(path))
@@ -326,6 +358,19 @@ namespace _3dPrinterPoster
 
   }
 
-  public enum MaterialType { Unknown = 0, PLA, PETG, ABS, ASA, PA12_CF, PA12_GF, Nylon, PC, TPU }
+  [TypeConverter(typeof(ExpandableObjectConverter))]
+  public class LayerFanSpeedSetting
+  {
+    [DisplayName("Layer #")]
+    public int Layer { get; set; }
+
+    [DisplayName("Speed (%)")]
+    public int Speed { get; set; }
+
+    public override string ToString() => $"L{Layer} → {Speed} %";
+
+  }
+
+  public enum MaterialType { Unknown = 0, PLA, PETG, ABS, ASA, PA12_CF, PA12_GF, Nylon, PC, TPU, PA612_CF }
   public enum PrinterType { Unknown = 0, QIDI_Q1_Pro, QIDI_X_MAX_3, Bambu_X1C, Prusa_MK4, Other }
 }
