@@ -18,6 +18,22 @@ namespace _3dPrinterPoster
     {
       List<string> lines = File.ReadAllLines(filename).ToList();
       bool isFromQidiStudio = lines.Any(line => line.Contains("QIDIStudio"));
+      bool isFromOrcaSlicer = lines.Any(line => line.Contains("OrcaSlicer"));
+
+      if( !(isFromOrcaSlicer || isFromQidiStudio))
+      {
+        MessageBox.Show("This software only works with OrcaSlicer and QIDIStudio.");
+        return;
+      }
+
+      string layerHeightString = "Z_HEIGHT:";
+      if (isFromQidiStudio)
+        layerHeightString = "Z_HEIGHT:";
+      else if (isFromOrcaSlicer)
+        layerHeightString = "Z:";
+
+
+
       ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
 
       #region Utilities
@@ -35,11 +51,11 @@ namespace _3dPrinterPoster
       int CheckCurrentLayer(PrintSettings options, string line)
       {
         int currentLayer = 0;
-        string layerTag = isFromQidiStudio ? ";Z_HEIGHT:" : ";Z:";
+        //string layerTag = isFromQidiStudio ? ";Z_HEIGHT:" : ";Z:";
         ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
         string lineNoWS = ClearWhiteSpace(line);
         
-        if (lineNoWS.StartsWith(layerTag))
+        if (lineNoWS.Contains(layerHeightString))
         {
           lineNoWS = isFromQidiStudio ? lineNoWS.Replace("Z_HEIGHT:", "Z:") : lineNoWS;
           string ZArgument = "Z:";
@@ -245,7 +261,7 @@ namespace _3dPrinterPoster
         {
           string line = inputLines[ii];
 
-          if( line.Contains("Z_HEIGHT:"))
+          if( line.Contains(layerHeightString, StringComparison.Ordinal))
             currentLayer = CheckCurrentLayer(options, line);
           
           //Override Feedrates
@@ -299,7 +315,7 @@ namespace _3dPrinterPoster
         {
           string line = inputLines[ii];
 
-          if(line.Contains("Z_HEIGHT:"))
+          if(line.Contains(layerHeightString, StringComparison.Ordinal))
             currentLayer = CheckCurrentLayer(options, line);
 
           if (currentLayer != lastLayer)
@@ -347,6 +363,20 @@ namespace _3dPrinterPoster
       {
         List<string> result = new List<string>();
 
+        string supportInterfaceKeyword = "Supportinterface";
+        string featureKeyword = "FEATURE:";
+
+        if (isFromQidiStudio)
+        {
+          supportInterfaceKeyword = "Supportinterface";
+          featureKeyword = "FEATURE:";
+        }
+        else if (isFromOrcaSlicer)
+        {
+          supportInterfaceKeyword = "TYPE:Supportinterface";
+          featureKeyword = "TYPE:";
+        }
+
         ToddUtils.FileParser.cFileParse fp = new ToddUtils.FileParser.cFileParse();
 
         if (options.ApplySupportInterfaceNozzleTemp)
@@ -367,10 +397,10 @@ namespace _3dPrinterPoster
               lastNozzleTempCommand = line;
             }
 
-            if (line.Contains("FEATURE: "))
+            if (line.Contains(featureKeyword))
             {
               line = line.Replace(" ", "");
-              if (line.Contains("Supportinterface"))
+              if (line.Contains(supportInterfaceKeyword))
               {
                 if (!inSupportInterfaceFeature)
                 {
@@ -403,7 +433,7 @@ namespace _3dPrinterPoster
         int currentLayer = 1;
         foreach (string line in input)
         {
-          if (line.Contains("Z_HEIGHT:"))
+          if (line.Contains(layerHeightString, StringComparison.Ordinal))
             currentLayer = CheckCurrentLayer(options, line);
           int currentSpeed = options.EnablePartCoolingFan ? options.GetFanSpeedForLayer(currentLayer) : 0;
           string thisline = line;
@@ -527,7 +557,7 @@ namespace _3dPrinterPoster
           int currentLayer = CheckCurrentLayer(options, line);
           var messages = new List<string>();
 
-          int zIndex = line.IndexOf("Z_HEIGHT", StringComparison.OrdinalIgnoreCase);
+          int zIndex = line.IndexOf(layerHeightString, StringComparison.OrdinalIgnoreCase);
           if (zIndex < 0)
             return messages;
 
@@ -599,7 +629,7 @@ namespace _3dPrinterPoster
           }
 
           // ---- LAYER INFO ----
-          if (line.Contains("Z_HEIGHT", StringComparison.OrdinalIgnoreCase))
+          if (line.Contains(layerHeightString, StringComparison.Ordinal))
           {
             result.AddRange(CreateOperatorMessages(line));
           }
