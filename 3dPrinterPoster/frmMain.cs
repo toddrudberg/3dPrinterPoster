@@ -125,12 +125,11 @@ namespace _3dPrinterPoster
           if (dlg.ShowDialog(this) == DialogResult.OK)
           {
             currentSettings.Save(settingsPath);
-
-            MessageBox.Show(
-              $"Saved settings profile: {currentSettings.ProfileName}",
-              "Settings Saved",
-              MessageBoxButtons.OK,
-              MessageBoxIcon.Information);
+          }
+          else
+          {
+            this.Enabled = true;
+            return;
           }
           // else: do nothing (cancel means no changes)
         }

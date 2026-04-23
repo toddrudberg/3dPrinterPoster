@@ -11,6 +11,24 @@ namespace _3dPrinterPoster
 {
   public class PrintSettings
   {
+    [Category("Ironing Settings")]
+    [DisplayName("Ironing Speed")]
+    [Description("Good range: 20mm/s - 50mm/s")]
+    [DefaultValue(50)]
+    public double ironSpeed { get; set; } = 50d;
+
+    [Category("Ironing Settings")]
+    [DisplayName("Nozzle Temp")]
+    [Description("PA612CF - 280, ASA - 250, PLA - 205")]
+    [DefaultValue(280)]
+    public double ironNozzleTemp { get; set; } = 280d;
+
+    [Category("Ironing Settings")]
+    [DisplayName("Use Ironing Settings")]
+    [Description("Use Ironing Settings")]
+    [DefaultValue(false)]
+    public bool ironUseSettings { get; set; } = false;
+
 
     [Category("Bed Setup")]
     [DisplayName("Autolevel Bed?")]

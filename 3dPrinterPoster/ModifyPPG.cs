@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing.Printing;
 using System.Linq;
 using System.Reflection.Emit;
 using System.Text;
@@ -7,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using System.Windows.Forms;
+using System.Xml;
 using static System.Windows.Forms.LinkLabel;
 
 namespace _3dPrinterPoster
@@ -255,11 +257,21 @@ namespace _3dPrinterPoster
       {
         List<string> result = new List<string>();
         int currentLayer = 0;
-        
+
+        bool inIroningLayer = false;
 
         for (int ii = 0; ii < inputLines.Count; ii++)
         {
           string line = inputLines[ii];
+
+          if( line.Contains("TYPE:"))
+          {
+            if (line.Contains("Ironing"))
+              inIroningLayer = true;
+            else
+              inIroningLayer = false;
+          }
+
 
           if( line.Contains(layerHeightString, StringComparison.Ordinal))
             currentLayer = CheckCurrentLayer(options, line);
@@ -271,7 +283,7 @@ namespace _3dPrinterPoster
             bool farg = fp.GetArgument(line, "F", out argument);
             double fCmd = argument;
 
-            if (farg)
+            if (farg && !inIroningLayer)
             {
               bool xarg = fp.GetArgument(line, "X", out argument);
               bool yarg = fp.GetArgument(line, "Y", out argument);
@@ -764,6 +776,62 @@ namespace _3dPrinterPoster
         result.Add("G1 X150 Y150 Z150 F6000");
         return result;
       }
+      List<string> SetIroningSettings(List<string> input, PrintSettings options)
+      {
+        var result = new List<string>();
+        if(!options.ironUseSettings)
+        {
+          result = input.ToList();
+          return result;
+        }
+        bool inIronSection = false;
+        double nozzleTempPrevious = 0;
+        foreach( string s in input)
+        {
+          string line = s;
+          
+          if( !inIronSection && line.Contains("M104"))
+          {
+            nozzleTempPrevious = fp.GetArgument2(line, "S");
+          }
+
+
+          if(s.Contains("TYPE:"))
+          {
+            if(s.Contains("Ironing"))
+            {
+              inIronSection = true;
+              result.Add(s);
+              line = $"M104 S{options.ironNozzleTemp}";
+            }
+            else
+            {
+              if( inIronSection )
+                result.Add($"M104 S{nozzleTempPrevious:F0} ; reset nozzle after ironing_section ");
+              inIronSection = false;
+            }
+          }
+
+          if( inIronSection)
+          {
+            if(line.Contains("M104"))
+            {
+              line = $"M104 S{options.ironNozzleTemp:F0} ; nozzle set to Ironing nozzle Temp";
+            }
+            if(line.StartsWith("G1 F")) //this should be safe, sometimes F args are passed after an XY argument. 
+            {
+              double speed = fp.GetArgument2(line, "F");
+              //if (speed > options.ironSpeed * 60)
+              {
+                line = $"G1 F{(options.ironSpeed * 60):F0} ; feedrate set to Ironing speed {options.ironSpeed:F0}mm/s";
+              }
+            }
+          }
+
+          result.Add(line);
+        }
+        return result;
+      }
 
 
       List<string> output = InitialAndGlobalSettings(lines, options);
@@ -771,6 +839,7 @@ namespace _3dPrinterPoster
       output = SetNozzleTempsByLayer(output, options);
       output = SetSupportInterfaceTemp(output, options);
       output = SetCoolingFanLevels(output, options);
+      output = SetIroningSettings(output, options);
       output = InsertOperatorMessages(output, options);
       output = CleanUpKnownBadCommands(output, options);
       
